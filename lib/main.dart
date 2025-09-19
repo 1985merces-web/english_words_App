@@ -372,7 +372,12 @@ class _FlashcardScreenState extends State<FlashcardScreen> {
                       child: GestureDetector(
                         onTap: () {
                           if (currentSetWords.isNotEmpty) {
-                            _addWordToCustomSet(currentSetWords[currentIndex]);
+                            // Check if we're in a custom list
+                            if (selectedLevel == 'custom') {
+                              _removeWordFromCustomList(currentSetWords[currentIndex]);
+                            } else {
+                              _addWordToCustomSet(currentSetWords[currentIndex]);
+                            }
                           }
                         },
                         child: Container(
@@ -384,8 +389,8 @@ class _FlashcardScreenState extends State<FlashcardScreen> {
                           ),
                           child: Center(
                             child: Icon(
-                              Icons.star_border,
-                              color: Colors.blueGrey.shade600,
+                              selectedLevel == 'custom' ? Icons.delete_outline : Icons.star_border,
+                              color: selectedLevel == 'custom' ? Colors.red.shade600 : Colors.blueGrey.shade600,
                               size: 22,
                             ),
                           ),
@@ -510,7 +515,14 @@ class _FlashcardScreenState extends State<FlashcardScreen> {
                 top: 8,
                 left: 8,
                 child: GestureDetector(
-                  onTap: () => _addWordToCustomSet(entry),
+                  onTap: () {
+                    // Check if we're in a custom list
+                    if (selectedLevel == 'custom') {
+                      _removeWordFromCustomList(entry);
+                    } else {
+                      _addWordToCustomSet(entry);
+                    }
+                  },
                   child: Container(
                     width: 28,
                     height: 28,
@@ -520,8 +532,8 @@ class _FlashcardScreenState extends State<FlashcardScreen> {
                     ),
                     child: Center(
                       child: Icon(
-                        Icons.star_border,
-                        color: Colors.blueGrey.shade600,
+                        selectedLevel == 'custom' ? Icons.delete_outline : Icons.star_border,
+                        color: selectedLevel == 'custom' ? Colors.red.shade600 : Colors.blueGrey.shade600,
                         size: 18,
                       ),
                     ),
@@ -1109,6 +1121,39 @@ class _FlashcardScreenState extends State<FlashcardScreen> {
   }
 
   // --- ADD THESE METHODS ---
+
+  Future<void> _removeWordFromCustomList(WordEntry word) async {
+    if (selectedLevel != 'custom') {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Can only remove words from custom lists.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    // Remove the word from the in-memory list
+    setState(() {
+      allWords.removeWhere((entry) =>
+          entry.sublist == selectedSublist &&
+          entry.en.trim().toLowerCase() == word.en.trim().toLowerCase());
+      filterCurrentSet();
+    });
+
+    // Save the updated custom lists
+    final updatedCustomLists = allWords.where((entry) => entry.level == 'custom').toList();
+    await _saveCustomListEntries(updatedCustomLists);
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Removed "${word.en}" from custom list.'),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
 
   Future<void> _addWordToCustomSet(WordEntry word) async {
     if (targetCustomSet.isEmpty) {
@@ -1943,62 +1988,98 @@ class _WordsMenuPanelState extends State<_WordsMenuPanel> {
             // Levels column
             SizedBox(
               width: 140,
-              child: ListView.builder(
-                itemCount: levels.length,
-                itemBuilder: (_, i) {
-                  final lvl = levels[i];
-                  final selected = lvl == activeLevel;
-                  return ListTile(
-                    dense: true,
-                    selected: selected,
-                    leading: selected ? const Icon(Icons.arrow_right, color: Colors.blue) : null,
-                    title: Text(
-                      lvl,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        color: selected ? Colors.blue : Colors.black87,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(12.0),
+                    child: Text(
+                      'Level',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: Colors.black,
                       ),
                     ),
-                    onTap: () {
-                      setState(() => activeLevel = lvl);
-                      widget.onChangeLevel(lvl);
-                    },
-                  );
-                },
+                  ),
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: levels.length,
+                      itemBuilder: (_, i) {
+                        final lvl = levels[i];
+                        final selected = lvl == activeLevel;
+                        return ListTile(
+                          dense: true,
+                          selected: selected,
+                          leading: selected ? const Icon(Icons.arrow_right, color: Colors.blue) : null,
+                          title: Text(
+                            lvl,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: selected ? Colors.blue : Colors.black87,
+                            ),
+                          ),
+                          onTap: () {
+                            setState(() => activeLevel = lvl);
+                            widget.onChangeLevel(lvl);
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ],
               ),
             ),
             const VerticalDivider(width: 1),
             // Sublists column (only of active level)
             Expanded(
-              child: ListView.builder(
-                itemCount: sublists.length,
-                itemBuilder: (_, i) {
-                  final sub = sublists[i];
-                  final selected = activeLevel == widget.currentLevel && sub == widget.currentSublist;
-                  return ListTile(
-                    dense: true,
-                    selected: selected,
-                    title: Text(
-                      _fmtSub(sub),
-                      style: TextStyle(
-                        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                        color: selected ? Colors.blueGrey.shade900 : Colors.black87,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(12.0),
+                    child: Text(
+                      'List',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: Colors.black,
                       ),
                     ),
-                    // --- ADD THIS DELETE BUTTON FOR CUSTOM LISTS ---
-                    trailing: activeLevel == 'custom'
-                        ? IconButton(
-                            icon: Icon(Icons.delete_outline, color: Colors.red.shade300, size: 20),
-                            onPressed: () {
-                              // Find the state and call the delete method
-                              final screenState = context.findAncestorStateOfType<_FlashcardScreenState>();
-                              screenState?._showDeleteCustomListDialog(sub);
-                            },
-                          )
-                        : (selected ? const Icon(Icons.check, color: Colors.blueGrey) : null),
-                    onTap: () => widget.onSelect(activeLevel, sub),
-                  );
-                },
+                  ),
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: sublists.length,
+                      itemBuilder: (_, i) {
+                        final sub = sublists[i];
+                        final selected = activeLevel == widget.currentLevel && sub == widget.currentSublist;
+                        return ListTile(
+                          dense: true,
+                          selected: selected,
+                          title: Text(
+                            _fmtSub(sub),
+                            style: TextStyle(
+                              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                              color: selected ? Colors.blueGrey.shade900 : Colors.black87,
+                            ),
+                          ),
+                          // --- ADD THIS DELETE BUTTON FOR CUSTOM LISTS ---
+                          trailing: activeLevel == 'custom'
+                              ? IconButton(
+                                  icon: Icon(Icons.delete_outline, color: Colors.red.shade300, size: 20),
+                                  onPressed: () {
+                                    // Find the state and call the delete method
+                                    final screenState = context.findAncestorStateOfType<_FlashcardScreenState>();
+                                    screenState?._showDeleteCustomListDialog(sub);
+                                  },
+                                )
+                              : (selected ? const Icon(Icons.check, color: Colors.blueGrey) : null),
+                          onTap: () => widget.onSelect(activeLevel, sub),
+                        );
+                      },
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
