@@ -5,6 +5,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:csv/csv.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 
@@ -888,61 +889,64 @@ class _FlashcardScreenState extends State<FlashcardScreen> {
               decoration: BoxDecoration(
                 color: darkTheme ? const Color(0xFF1A237E) : const Color(0xFF1A237E),
               ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      gridMode
-                          ? 'Cards ${currentSetWords.isEmpty ? 0 : (gridPage * 10 + 1)} / ${currentSetWords.length}'
-                          : 'Cards ${currentSetWords.isEmpty ? 0 : (currentIndex + 1)} / ${currentSetWords.length}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontFamily: 'Inter',
-                        fontWeight: FontWeight.w400,
-                        fontSize: 16,
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        gridMode
+                            ? 'Cards ${currentSetWords.isEmpty ? 0 : (gridPage * 10 + 1)} / ${currentSetWords.length}'
+                            : 'Cards ${currentSetWords.isEmpty ? 0 : (currentIndex + 1)} / ${currentSetWords.length}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontFamily: 'Inter',
+                          fontWeight: FontWeight.w400,
+                          fontSize: 16,
+                        ),
                       ),
-                    ),
-                    GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          showSettingsMenu = !showSettingsMenu;
-                        });
-                      },
-                      child: SvgPicture.asset(
-                        'assets/icons/settings.svg',
-                        width: 28,
-                        height: 28,
-                        colorFilter: const ColorFilter.mode(Colors.white, BlendMode.srcIn),
+                      GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            showSettingsMenu = !showSettingsMenu;
+                          });
+                        },
+                        child: SvgPicture.asset(
+                          'assets/icons/settings.svg',
+                          width: 28,
+                          height: 28,
+                          colorFilter: const ColorFilter.mode(Colors.white, BlendMode.srcIn),
+                        ),
                       ),
-                    ),
-                    _WordsMenuButton(
-                      groupedLists: getGroupedLists(),
-                      currentLevel: selectedLevel,
-                      currentSublist: selectedSublist,
-                      onOpen: () {
-                        setState(() {
-                          // open panel with the current level active
-                          panelActiveLevel = selectedLevel.isNotEmpty
-                              ? selectedLevel
-                              : (getGroupedLists().keys.isNotEmpty
-                                  ? getGroupedLists().keys.first
-                                  : '');
-                          showWordsMenu = !showWordsMenu;
-                          showSettingsMenu = false; // close settings if open
-                        });
-                      },
-                      onSelect: (level, sublist) {
-                        setState(() {
-                          selectedLevel = level;
-                          selectedSublist = sublist;
-                          filterCurrentSet();
-                         showWordsMenu = false; // close after choose
-                        });
-                      },
-                    ),
-                  ],
+                      _WordsMenuButton(
+                        groupedLists: getGroupedLists(),
+                        currentLevel: selectedLevel,
+                        currentSublist: selectedSublist,
+                        onOpen: () {
+                          setState(() {
+                            // open panel with the current level active
+                            panelActiveLevel = selectedLevel.isNotEmpty
+                                ? selectedLevel
+                                : (getGroupedLists().keys.isNotEmpty
+                                    ? getGroupedLists().keys.first
+                                    : '');
+                            showWordsMenu = !showWordsMenu;
+                            showSettingsMenu = false; // close settings if open
+                          });
+                        },
+                        onSelect: (level, sublist) {
+                          setState(() {
+                            selectedLevel = level;
+                            selectedSublist = sublist;
+                            filterCurrentSet();
+                            showWordsMenu = false; // close after choose
+                          });
+                        },
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -1967,11 +1971,18 @@ class _WordsMenuPanelState extends State<_WordsMenuPanel> {
     final sublists = List<String>.from(widget.groupedLists[activeLevel] ?? [])
       ..sort(_compareSublists);
 
+    final itemCount = math.max(levels.length, sublists.length);
+    const headerHeight = 64.0;
+    const tileHeight = 44.0;
+    const minPanelHeight = 220.0;
+    const maxPanelHeight = 420.0;
+    final panelHeight = (headerHeight + itemCount * tileHeight).clamp(minPanelHeight, maxPanelHeight);
+
     return Material(
       color: Colors.transparent,
       child: Container(
         width: 420,
-        height: 420,
+        height: panelHeight,
         decoration: BoxDecoration(
           color: const Color(0xFFF4EFFA),
           borderRadius: BorderRadius.circular(18),
