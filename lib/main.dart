@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 // import 'home_page.dart'; // <-- import your splash page
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -827,7 +827,11 @@ class _FlashcardScreenState extends State<FlashcardScreen> {
                 children: [
                   // Play icon left of label, black color
                   _settingsRow(
-                    icon: Icon(Icons.play_arrow, size: 32, color: Colors.black),
+                    icon: Icon(
+                      Icons.play_arrow,
+                      size: 32,
+                      color: darkTheme ? Colors.white : Colors.black,
+                    ),
                     label: 'random speaking',
                     value: randomSpeaking,
                     onChanged: (v) => setState(() => randomSpeaking = v),
@@ -835,7 +839,15 @@ class _FlashcardScreenState extends State<FlashcardScreen> {
                   ),
                   const SizedBox(height: 18),
                   _settingsRow(
-                    icon: SvgPicture.asset('assets/icons/DarkTheme.svg', width: 32, height: 32),
+                    icon: SvgPicture.asset(
+                      'assets/icons/darkTheme.svg',
+                      width: 32,
+                      height: 32,
+                      colorFilter: ColorFilter.mode(
+                        darkTheme ? Colors.white : const Color(0xFF1E1E1E),
+                        BlendMode.srcIn,
+                      ),
+                    ),
                     label: 'dark theme',
                     value: darkTheme,
                     onChanged: (v) => setState(() => darkTheme = v),
@@ -843,7 +855,6 @@ class _FlashcardScreenState extends State<FlashcardScreen> {
                   ),
                   const SizedBox(height: 18),
                   _settingsRow(
-                    // --- RESTORE SVG ICON ---
                     icon: SvgPicture.asset(
                       'assets/icons/addfile.svg',
                       width: 32,
@@ -1418,55 +1429,7 @@ class _FlashcardScreenState extends State<FlashcardScreen> {
     );
   }
 
-  void _showSaveToDialog() {
-    final customLists = getGroupedLists()['custom'] ?? [];
 
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Select Target List'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: customLists.length + 1, // Add 1 for the "Create New" option
-            itemBuilder: (context, index) {
-              // If it's the last item, show the "Create New" button
-              if (index == customLists.length) {
-                return ListTile(
-                  leading: const Icon(Icons.add_circle_outline, color: Colors.green),
-                  title: const Text('Create New List...'),
-                  onTap: () {
-                    Navigator.pop(context); // Close the current dialog
-                    _showCustomListDialog(setAsTarget: true); // Open create dialog and flag it to set as target
-                  },
-                );
-              }
-
-              // Otherwise, show an existing custom list
-              final listName = customLists[index];
-              final displayName = listName.replaceFirst('list_custom_', '').replaceAll('_', ' ');
-              final isSelected = listName == targetCustomSet;
-              return ListTile(
-                title: Text(displayName),
-                trailing: isSelected ? const Icon(Icons.check_circle, color: Colors.blue) : null,
-                onTap: () {
-                  _setTargetCustomSet(listName);
-                  Navigator.pop(context);
-                },
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
 
   void _showCustomListDialog({bool setAsTarget = false}) {
     final TextEditingController listNameController = TextEditingController();
@@ -1527,39 +1490,61 @@ class _FlashcardScreenState extends State<FlashcardScreen> {
   // Format list name
   String formattedListName = 'list_custom_${listName.replaceAll(' ', '_').toLowerCase()}';
   
-  // --- ADD THIS BLOCK TO SAVE THE LIST NAME ---
+  // Save the list name
   final prefs = await SharedPreferences.getInstance();
   final customListNames = prefs.getStringList('custom_list_names') ?? [];
   if (!customListNames.contains(formattedListName)) {
     customListNames.add(formattedListName);
     await prefs.setStringList('custom_list_names', customListNames);
   }
-  // --- END OF BLOCK ---
 
   // Process the input text to get individual words
   List<String> words = wordsText
-      .split(RegExp(r'[,\n\r\s]+')) // Split by comma, newline, or space
+      .split(RegExp(r'[,\n\r\s]+'))
       .map((word) => word.trim())
       .where((word) => word.isNotEmpty)
       .toList();
   
-  // Show loading indicator
+  // Show loading indicator with progress
+  int processed = 0;
   showDialog(
     context: context,
     barrierDismissible: false,
-    builder: (context) => AlertDialog(
-      content: Row(
-        children: [
-          CircularProgressIndicator(),
-          SizedBox(width: 16),
-          Text('Processing words...'),
-        ],
+    builder: (context) => StatefulBuilder(
+      builder: (context, setState) => AlertDialog(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('Processing words: $processed/${words.length}'),
+            Text('Finding Ukrainian translations...'),
+          ],
+        ),
       ),
     ),
   );
   
   try {
-    List<WordEntry> newEntries = await _processWordsWithAPI(formattedListName, words);
+    List<WordEntry> newEntries = [];
+    
+    for (int i = 0; i < words.length; i++) {
+      final word = words[i];
+      final translation = await translateToUkrainian(word);
+      final example = 'They archived the $word for future use.';
+      
+      newEntries.add(WordEntry(
+        'custom',
+        formattedListName,
+        word.trim(),
+        translation,
+        example,
+        '',
+      ));
+      
+      // Update progress
+      processed = i + 1;
+    }
     
     // Save the custom list
     final existingLists = await _loadCustomLists();
@@ -1568,9 +1553,14 @@ class _FlashcardScreenState extends State<FlashcardScreen> {
     // Close the loading dialog
     Navigator.pop(context);
     
-    // Show success message
+    // Show success message with statistics
+    int translatedCount = newEntries.where((e) => e.uk != '[ Переклад потрібен ]' && e.uk != e.en).length;
+    
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Custom list created: ${listName}')),
+      SnackBar(
+        content: Text('Custom list created: $listName\n$translatedCount/${words.length} words translated'),
+        duration: Duration(seconds: 4),
+      ),
     );
     
     // Reload words to include new custom list
@@ -1582,7 +1572,7 @@ class _FlashcardScreenState extends State<FlashcardScreen> {
       selectedSublist = formattedListName;
       if (setAsTarget) {
         targetCustomSet = formattedListName;
-        _setTargetCustomSet(formattedListName); // Persist it
+        _setTargetCustomSet(formattedListName);
       }
       filterCurrentSet();
     });
@@ -1593,32 +1583,17 @@ class _FlashcardScreenState extends State<FlashcardScreen> {
     
     // Show error message
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Error creating list: ${e.toString()}')),
+      SnackBar(
+        content: Text('Error creating list: ${e.toString()}'),
+        backgroundColor: Colors.red,
+      ),
     );
   }
 }
 
-Future<List<WordEntry>> _processWordsWithAPI(String listName, List<String> words) async {
-  final entries = <WordEntry>[];
-  for (final word in words) {
-    final translation = await translateToUkrainian(word);
-    final example = await getExampleSentence(word);
-    entries.add(WordEntry(
-      'custom',
-      listName,
-      word.trim(),
-      translation,
-      example,   // example1
-      '',        // example2
-    ));
-  }
-  return entries;
-}
 
-Future<void> _saveCustomList(List<WordEntry> entries) async {
-  final customLists = [...await _loadCustomLists(), ...entries];
-  await _saveCustomListEntries(customLists);
-}
+
+
 
 Future<List<WordEntry>> _loadCustomLists() async {
   final prefs = await SharedPreferences.getInstance();
@@ -1689,35 +1664,75 @@ Future<void> _deleteCustomList(String listName) async {
 
 Future<void> loadDictionary() async {
   try {
-    // --- FIX THE PATH HERE ---
-    final rawDict = await rootBundle.loadString('assets/en_uk_dictionary.csv');
-    List<List<dynamic>> dictTable = const CsvToListConverter().convert(rawDict, eol: '\n');
+    // Load from the main CSV file instead of a separate dictionary
+    final rawData = await rootBundle.loadString('assets/sets/all_lists.csv');
+    final csvTable = const CsvToListConverter().convert(rawData, eol: '\n');
     
-    // Create a map for fast lookups
-    for (var row in dictTable.skip(1)) {
-      if (row.length >= 2) {
-        enUkDictionary[row[0].toString().toLowerCase()] = row[1].toString();
+    // Create a map for fast lookups from the existing CSV data
+    for (var row in csvTable.skip(1)) {
+      if (row.length >= 4) {
+        String englishWord = row[2].toString().toLowerCase().trim();
+        String ukrainianWord = row[3].toString().trim();
+        if (englishWord.isNotEmpty && ukrainianWord.isNotEmpty) {
+          enUkDictionary[englishWord] = ukrainianWord;
+        }
       }
     }
-    print('Dictionary loaded with ${enUkDictionary.length} entries');
+    print('Dictionary loaded with ${enUkDictionary.length} entries from main CSV');
   } catch (e) {
-    print('Dictionary file not found, using online translation only');
+    print('Error loading dictionary from CSV: $e');
   }
 }
 
-// Then update the translation function
-String translateFromDictionary(String word) {
-  return enUkDictionary[word.toLowerCase()] ?? '[ Переклад відсутній ]';
+
+
+// Enhanced translation function with better fallback
+Future<String> translateToUkrainian(String englishWord) async {
+  final word = englishWord.toLowerCase().trim();
+  
+  // First try the local dictionary (from CSV)
+  final localTranslation = enUkDictionary[word];
+  if (localTranslation != null && localTranslation.isNotEmpty) {
+    return localTranslation;
+  }
+  
+  // Try online translation as fallback
+  try {
+    final translation = await getOnlineTranslation(word);
+    if (translation.isNotEmpty && translation != word) {
+      return translation;
+    }
+  } catch (e) {
+    print('Online translation failed: $e');
+  }
+  
+  // Final fallback - return placeholder in Ukrainian
+  return '[ Переклад потрібен ]';
 }
 
-// ADD: helpers inside the state + close the state class
-
-// Try local dictionary first; fallback keeps UI working.
-// Swap this for a real API later if needed.
-Future<String> translateToUkrainian(String englishWord) async {
-  final local = translateFromDictionary(englishWord);
-  if (local != '[ Переклад відсутній ]') return local;
-  return englishWord;
+// Add online translation function
+Future<String> getOnlineTranslation(String word) async {
+  try {
+    // Using a simple translation API (MyMemory - free tier)
+    final url = 'https://api.mymemory.translated.net/get?q=${Uri.encodeComponent(word)}&langpair=en|uk';
+    final response = await http.get(Uri.parse(url));
+    
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      final translatedText = data['responseData']['translatedText'];
+      
+      // Basic validation - avoid returning the same word or obvious errors
+      if (translatedText != null && 
+          translatedText.toString().trim().isNotEmpty &&
+          translatedText.toString().toLowerCase() != word.toLowerCase()) {
+        return translatedText.toString().trim();
+      }
+    }
+  } catch (e) {
+    print('Translation API error: $e');
+  }
+  
+  return ''; // Return empty string if translation fails
 }
 
 // Placeholder example generator for custom lists.
@@ -2099,3 +2114,4 @@ class _WordsMenuPanelState extends State<_WordsMenuPanel> {
     );
   }
 }
+
