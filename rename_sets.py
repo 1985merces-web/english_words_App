@@ -1,5 +1,5 @@
 input_file = "assets/sets/all_sets.csv"
-output_file = "assets/sets/all_lists.csv"
+output_file = "assets/sets/combined_words.csv"
 
 with open(input_file, "r", encoding="utf-8") as f:
     content = f.read()
