@@ -8,7 +8,6 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http;
 
 void main() {
   runApp(const WordsApp());
@@ -406,22 +405,38 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     }
 
     final rng = math.Random();
+    const bool speakStudyFirst = true;
 
     if (randomSpeaking) {
       int? lastIdx;
+      int lastLen = currentSetWords.length;
+      List<int> order = [];
+      int pos = 0;
+
+      void refillOrder() {
+        final len = currentSetWords.length;
+        order = List<int>.generate(len, (i) => i);
+        order.shuffle(rng);
+        if (lastIdx != null && len > 1 && order.isNotEmpty && order.first == lastIdx) {
+          final swap = 1 + rng.nextInt(len - 1);
+          final tmp = order[0];
+          order[0] = order[swap];
+          order[swap] = tmp;
+        }
+        pos = 0;
+        lastLen = len;
+      }
+
+      refillOrder();
+
       while (isPlaying) {
         if (currentSetWords.isEmpty) break;
-        int idx;
-        if (currentSetWords.length == 1) {
-          idx = 0;
-        } else {
-          idx = rng.nextInt(currentSetWords.length);
-          int guard = 0;
-          while (idx == lastIdx && guard < 6) {
-            idx = rng.nextInt(currentSetWords.length);
-            guard++;
-          }
+        if (currentSetWords.length != lastLen || pos >= order.length) {
+          refillOrder();
+          if (order.isEmpty) break;
         }
+
+        final idx = order[pos++];
         lastIdx = idx;
 
         if (!mounted) break;
@@ -434,8 +449,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
         });
 
         final entry = currentSetWords[idx];
-        final studyFirst = rng.nextBool();
-        await speakEntry(entry, studyFirst: studyFirst);
+        await speakEntry(entry, studyFirst: speakStudyFirst);
         if (!isPlaying) break;
         await Future.delayed(const Duration(milliseconds: 700));
       }
@@ -453,8 +467,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
           }
         });
 
-        final studyFirst = showENFace;
-        await speakEntry(entry, studyFirst: studyFirst);
+        await speakEntry(entry, studyFirst: speakStudyFirst);
         if (!isPlaying) break;
         await Future.delayed(const Duration(seconds: 1));
       }
@@ -1160,31 +1173,20 @@ class _FlashcardScreenState extends State<FlashcardScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                   _settingsLanguageRow(
-                    label: 'Study Language',
-                    currentCode: studyLang,
-                    onChanged: (code) async {
+                  _settingsLanguageRow(
+                    studyCode: studyLang,
+                    nativeCode: nativeLang,
+                    onStudyChanged: (code) async {
                       final prefs = await SharedPreferences.getInstance();
                       await prefs.setString('study_language', code);
-                      setState(() {
-                         studyLang = code;
-                      });
-                      loadWords(); // reload data
+                      setState(() => studyLang = code);
+                      loadWords();
                     },
-                    darkTheme: darkTheme,
-                  ),
-                  const SizedBox(height: 12),
-                  _settingsLanguageRow(
-                    label: 'Native Language',
-                    currentCode: nativeLang,
-                    currentStudyCode: studyLang, // to highlight if same
-                    onChanged: (code) async {
+                    onNativeChanged: (code) async {
                       final prefs = await SharedPreferences.getInstance();
                       await prefs.setString('native_language', code);
-                      setState(() {
-                         nativeLang = code;
-                      });
-                      loadWords(); // reload data
+                      setState(() => nativeLang = code);
+                      loadWords();
                     },
                     darkTheme: darkTheme,
                   ),
@@ -1234,23 +1236,6 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                     value: darkTheme,
                     onChanged: (v) => setState(() => darkTheme = v),
                     darkTheme: darkTheme,
-                  ),
-                  const SizedBox(height: 18),
-                  _settingsRow(
-                    icon: SvgPicture.asset(
-                      'assets/icons/addfile.svg',
-                      width: 32,
-                      height: 32,
-                      colorFilter: ColorFilter.mode(
-                        darkTheme ? Colors.white : Colors.black,
-                        BlendMode.srcIn,
-                      ),
-                    ),
-                    label: 'add own file',
-                    value: false,
-                    onChanged: (_) => _showCustomListDialog(),
-                    darkTheme: darkTheme,
-                    isButton: true,
                   ),
                   const SizedBox(height: 10),
                   const Divider(),
@@ -1749,61 +1734,186 @@ class _FlashcardScreenState extends State<FlashcardScreen>
   }
 
   Widget _settingsLanguageRow({
-    required String label,
-    required String currentCode,
-    String? currentStudyCode,
-    required ValueChanged<String> onChanged,
+    required String studyCode,
+    required String nativeCode,
+    required ValueChanged<String> onStudyChanged,
+    required ValueChanged<String> onNativeChanged,
     required bool darkTheme,
   }) {
-    final Map<String, String> langNames = {
-      'en': 'English',
-      'es': 'Spanish',
-      'pt': 'Portuguese',
-      'uk': 'Ukrainian',
-    };
+    const options = <Map<String, String>>[
+      {'code': 'en', 'label': 'English', 'native': 'English', 'flag': '🇺🇸'},
+      {'code': 'es', 'label': 'Spanish', 'native': 'Español', 'flag': '🇪🇸'},
+      {'code': 'pt', 'label': 'Portuguese', 'native': 'Português', 'flag': '🇵🇹'},
+      {'code': 'uk', 'label': 'Ukrainian', 'native': 'Українська', 'flag': '🇺🇦'},
+    ];
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            color: darkTheme ? Colors.white70 : Colors.black54,
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-          ),
+    Map<String, String> byCode(String code) =>
+        options.firstWhere((o) => o['code'] == code, orElse: () => options.first);
+
+    final titleStyle = TextStyle(
+      color: darkTheme ? Colors.white70 : Colors.black54,
+      fontSize: 12,
+      fontWeight: FontWeight.w800,
+    );
+
+    final studyBg = darkTheme ? const Color(0xFF223142) : const Color(0xFFB3E5FC);
+    final nativeBg = darkTheme ? const Color(0xFF223142) : const Color(0xFFB2FFB2);
+    final borderColor = darkTheme
+        ? Colors.white24
+        : const Color(0xFF1A237E).withValues(alpha: 0.25);
+    final textColor = darkTheme ? Colors.white : const Color(0xFF1A237E);
+
+    Future<void> showPicker({
+      required String title,
+      required String currentCode,
+      required String disabledCode,
+      required ValueChanged<String> onPick,
+    }) async {
+      await showModalBottomSheet<void>(
+        context: context,
+        backgroundColor: darkTheme ? const Color(0xFF1E2A3A) : Colors.white,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
         ),
-        const SizedBox(height: 8),
-        Row(
-          children: langNames.entries.map((entry) {
-            final isSelected = entry.key == currentCode;
-            final isSameAsStudy = entry.key == currentStudyCode;
-            return GestureDetector(
-              onTap: isSameAsStudy ? null : () => onChanged(entry.key),
-              child: Opacity(
-                opacity: isSameAsStudy ? 0.3 : 1.0,
-                child: Container(
-                  margin: const EdgeInsets.only(right: 8),
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        builder: (ctx) {
+          return SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 10),
+                Container(
+                  width: 44,
+                  height: 5,
                   decoration: BoxDecoration(
-                    color: isSelected ? const Color(0xFF1A237E) : Colors.transparent,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: const Color(0xFF1A237E),
-                      width: 1,
-                    ),
-                  ),
-                  child: Text(
-                    entry.value,
-                    style: TextStyle(
-                      color: isSelected ? Colors.white : (darkTheme ? Colors.white : Colors.black),
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                    ),
+                    color: (darkTheme ? Colors.white : Colors.black).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(99),
                   ),
                 ),
+                const SizedBox(height: 12),
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: darkTheme ? Colors.white : const Color(0xFF1A237E),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                for (final o in options)
+                  ListTile(
+                    enabled: o['code'] != disabledCode,
+                    leading: Text(o['flag']!, style: const TextStyle(fontSize: 22)),
+                    title: Text(
+                      o['label']!,
+                      style: TextStyle(
+                        color: darkTheme ? Colors.white : Colors.black87,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    subtitle: Text(
+                      o['native']!,
+                      style: TextStyle(
+                        color: darkTheme ? Colors.white70 : Colors.black54,
+                      ),
+                    ),
+                    trailing: o['code'] == currentCode
+                        ? Icon(
+                            Icons.check,
+                            color: darkTheme ? Colors.white : const Color(0xFF1A237E),
+                          )
+                        : null,
+                    onTap: o['code'] == disabledCode
+                        ? null
+                        : () {
+                            Navigator.of(ctx).pop();
+                            onPick(o['code']!);
+                          },
+                  ),
+                const SizedBox(height: 10),
+              ],
+            ),
+          );
+        },
+      );
+    }
+
+    Widget pickerColumn({
+      required String title,
+      required String code,
+      required String disabledCode,
+      required ValueChanged<String> onPick,
+    }) {
+      final o = byCode(code);
+      final bg = title == 'Study' ? studyBg : nativeBg;
+      return Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: titleStyle),
+            const SizedBox(height: 8),
+            GestureDetector(
+              onTap: () => showPicker(
+                title: title,
+                currentCode: code,
+                disabledCode: disabledCode,
+                onPick: onPick,
               ),
-            );
-          }).toList(),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: bg,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: borderColor),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Text(o['flag']!, style: const TextStyle(fontSize: 18)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            o['label']!,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: textColor,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 16, // +25% from 13
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    Icon(
+                      Icons.keyboard_arrow_down,
+                      color: darkTheme ? Colors.white70 : Colors.black54,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        pickerColumn(
+          title: 'Study',
+          code: studyCode,
+          disabledCode: nativeCode,
+          onPick: onStudyChanged,
+        ),
+        const SizedBox(width: 12),
+        pickerColumn(
+          title: 'Native',
+          code: nativeCode,
+          disabledCode: studyCode,
+          onPick: onNativeChanged,
         ),
       ],
     );
@@ -1834,7 +1944,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                   color: darkTheme ? Colors.white : const Color(0xFF1E1E1E),
                   fontFamily: 'Inter',
                   fontWeight: FontWeight.w400,
-                  fontSize: 28, // Increased from 20
+                  fontSize: 21, // -25% from 28
                   letterSpacing: 0.5,
                 ),
               ),
@@ -1917,7 +2027,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                               : const Color(0xFF1E1E1E),
                           fontFamily: 'Inter',
                           fontWeight: FontWeight.w400,
-                          fontSize: 28, // Increased from 20
+                          fontSize: 21, // -25% from 28
                           letterSpacing: 0.5,
                         ),
                       ),
@@ -2007,6 +2117,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
   void _showCustomListDialog({bool setAsTarget = false}) {
     final TextEditingController listNameController = TextEditingController();
     final TextEditingController wordsController = TextEditingController();
+    final String studyLabel = studyLang.toUpperCase();
 
     showDialog(
       context: context,
@@ -2027,7 +2138,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
               TextField(
                 controller: wordsController,
                 decoration: InputDecoration(
-                  labelText: 'English Words',
+                  labelText: 'Words ($studyLabel)',
                   hintText: 'Enter words separated by commas or new lines',
                 ),
                 maxLines: 10,
@@ -2106,7 +2217,11 @@ class _FlashcardScreenState extends State<FlashcardScreen>
 
       for (int i = 0; i < words.length; i++) {
         final word = words[i];
-        final translation = await translateToUkrainian(word);
+        final translation = await translateWord(
+          word: word,
+          fromLang: studyLang,
+          toLang: nativeLang,
+        );
         final example = 'They archived the $word for future use.';
 
         newEntries.add(WordEntry(
@@ -2134,7 +2249,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
 
       // Show success message with statistics
       int translatedCount = newEntries
-          .where((e) => e.trans1 != '[ Переклад потрібен ]' && e.trans1 != e.wordMain)
+          .where((e) => e.trans1 != _translationNeeded && e.trans1 != e.wordMain)
           .length;
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2294,53 +2409,30 @@ class _FlashcardScreenState extends State<FlashcardScreen>
   }
 
 // Enhanced translation function with better fallback
-  Future<String> translateToUkrainian(String englishWord) async {
-    final word = englishWord.toLowerCase().trim();
+  static const String _translationNeeded = '[ Translation needed ]';
 
-    // First try the local dictionary (from CSV)
-    final localTranslation = enUkDictionary[word];
-    if (localTranslation != null && localTranslation.isNotEmpty) {
-      return localTranslation;
+  Future<String> translateWord({
+    required String word,
+    required String fromLang,
+    required String toLang,
+  }) async {
+    final from = fromLang.trim().toLowerCase();
+    final to = toLang.trim().toLowerCase();
+    final cleaned = word.trim();
+
+    if (cleaned.isEmpty) return '';
+    if (from == to) return cleaned;
+
+    if (from == 'en' && to == 'uk') {
+      final local = enUkDictionary[cleaned.toLowerCase()];
+      if (local != null && local.isNotEmpty) return local;
     }
 
-    // Try online translation as fallback
-    try {
-      final translation = await getOnlineTranslation(word);
-      if (translation.isNotEmpty && translation != word) {
-        return translation;
-      }
-    } catch (e) {
-      debugPrint('Online translation failed: $e');
-    }
-
-    // Final fallback - return placeholder in Ukrainian
-    return '[ Переклад потрібен ]';
+    return _translationNeeded;
   }
 
-// Add online translation function
-  Future<String> getOnlineTranslation(String word) async {
-    try {
-      // Using a simple translation API (MyMemory - free tier)
-      final url =
-          'https://api.mymemory.translated.net/get?q=${Uri.encodeComponent(word)}&langpair=en|uk';
-      final response = await http.get(Uri.parse(url));
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final translatedText = data['responseData']['translatedText'];
-
-        // Basic validation - avoid returning the same word or obvious errors
-        if (translatedText != null &&
-            translatedText.toString().trim().isNotEmpty &&
-            translatedText.toString().toLowerCase() != word.toLowerCase()) {
-          return translatedText.toString().trim();
-        }
-      }
-    } catch (e) {
-      debugPrint('Translation API error: $e');
-    }
-
-    return ''; // Return empty string if translation fails
+  Future<String> translateToUkrainian(String englishWord) async {
+    return translateWord(word: englishWord, fromLang: 'en', toLang: 'uk');
   }
 
 // Placeholder example generator for custom lists.
