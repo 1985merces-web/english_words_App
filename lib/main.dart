@@ -348,8 +348,13 @@ class _FlashcardScreenState extends State<FlashcardScreen>
 
   void nextGridPage() {
     setState(() {
-      int maxPage = (currentSetWords.length / _cardsPerGridPage).ceil() - 1;
-      if (gridPage < maxPage) {
+      final int maxPage =
+          (currentSetWords.length / _cardsPerGridPage).ceil() - 1;
+      if (maxPage <= 0) {
+        gridPage = 0;
+      } else if (gridPage >= maxPage) {
+        gridPage = 0;
+      } else {
         gridPage++;
       }
       gridCardENFace =
@@ -359,7 +364,13 @@ class _FlashcardScreenState extends State<FlashcardScreen>
 
   void prevGridPage() {
     setState(() {
-      if (gridPage > 0) {
+      final int maxPage =
+          (currentSetWords.length / _cardsPerGridPage).ceil() - 1;
+      if (maxPage <= 0) {
+        gridPage = 0;
+      } else if (gridPage <= 0) {
+        gridPage = maxPage;
+      } else {
         gridPage--;
       }
       gridCardENFace =
@@ -822,7 +833,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                             ? Icons.delete_outline
                             : Icons.star_border,
                         color: selectedLevel == 'custom'
-                            ? Colors.red.shade600
+                            ? Colors.blueGrey.shade400
                             : Colors.blueGrey.shade600,
                         size: 18,
                       ),
@@ -903,8 +914,9 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       );
     }
 
-    Widget gridView = LayoutBuilder(
-      builder: (context, constraints) {
+    Widget buildGridView({required double availableHeight}) {
+      return LayoutBuilder(
+        builder: (context, constraints) {
         final double maxWidth = constraints.maxWidth;
         final double horizontalPadding =
             math.max(12.0, math.min(32.0, maxWidth * 0.04));
@@ -928,10 +940,9 @@ class _FlashcardScreenState extends State<FlashcardScreen>
         final int itemsOnPage = totalRemaining > _cardsPerGridPage
             ? _cardsPerGridPage
             : totalRemaining;
-        final double viewportHeight =
-            mediaQuery.size.height - appBarTotalHeight - bottomBarHeight;
-        final double gridTopPadding = math.max(6.0, spacing * 0.6);
-        final double gridBottomPadding = bottomSafePadding + 12.0;
+        final double viewportHeight = availableHeight;
+        final double gridTopPadding = 0.0;
+        final double gridBottomPadding = 0.0;
         final int rows = itemsOnPage == 0
             ? 1
             : ((itemsOnPage + crossAxisCount - 1) ~/ crossAxisCount);
@@ -942,6 +953,13 @@ class _FlashcardScreenState extends State<FlashcardScreen>
         final double cardHeight = math.max(
             gridCardMinHeight, math.min(cardWidth * 0.78, fittedCardHeight));
         final double aspectRatio = cardWidth / cardHeight;
+        final double gridContentHeight =
+            rows * cardHeight + math.max(0, rows - 1) * spacing;
+        final double extraVerticalPadding = math.max(
+          0.0,
+          (viewportHeight - gridContentHeight - gridTopPadding - gridBottomPadding) /
+              2,
+        );
 
         return GestureDetector(
           onHorizontalDragEnd: (details) {
@@ -960,8 +978,8 @@ class _FlashcardScreenState extends State<FlashcardScreen>
             padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
             child: GridView.builder(
               padding: EdgeInsets.only(
-                bottom: gridBottomPadding,
-                top: gridTopPadding,
+                bottom: gridBottomPadding + extraVerticalPadding,
+                top: gridTopPadding + extraVerticalPadding,
               ),
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
@@ -977,8 +995,9 @@ class _FlashcardScreenState extends State<FlashcardScreen>
             ),
           ),
         );
-      },
-    );
+        },
+      );
+    }
 
     // --- SLIDER SECTION (OVERLAY ABOVE BOTTOM BAR) ---
     Widget sliderSection = const SizedBox.shrink();
@@ -1269,14 +1288,13 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                 );
 
                 if (gridMode) {
-                  return SingleChildScrollView(
+                  return Padding(
                     padding: contentPadding,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Center(child: gridView),
-                        const SizedBox(height: 24),
-                      ],
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minHeight: contentMinHeight),
+                      child: Center(
+                        child: buildGridView(availableHeight: contentMinHeight),
+                      ),
                     ),
                   );
                 }
@@ -1467,11 +1485,16 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                         ),
                         child: Text(
                           showENFace ? studyLang.toUpperCase() : nativeLang.toUpperCase(),
+                          strutStyle: const StrutStyle(
+                            forceStrutHeight: true,
+                            height: 1.0,
+                          ),
                           style: const TextStyle(
                             color: Color(0xFF1A237E),
                             fontFamily: 'Inter',
                             fontWeight: FontWeight.w700,
                             fontSize: 16,
+                            height: 1.0,
                           ),
                           textAlign: TextAlign.center,
                         ),
@@ -1734,9 +1757,9 @@ class _FlashcardScreenState extends State<FlashcardScreen>
   }) {
     final Map<String, String> langNames = {
       'en': 'English',
-      'uk': 'Ukrainian',
-      'pt': 'Portuguese',
       'es': 'Spanish',
+      'pt': 'Portuguese',
+      'uk': 'Ukrainian',
     };
 
     return Column(
@@ -2937,16 +2960,6 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
               if (!pickingNative || studyLang != 'en') const SizedBox(height: 24),
 
               // UKRAINIAN
-              if (!pickingNative || studyLang != 'uk')
-                _LanguageButton(
-                  flag: '🇺🇦',
-                  label: 'Ukrainian',
-                  subLabel: pickingNative ? 'Українська' : 'Study Ukrainian',
-                  color: const Color(0xFFE3F2FD),
-                  onTap: () => pickingNative ? _selectNative('uk') : _selectStudy('uk'),
-                ),
-              if (!pickingNative || studyLang != 'uk') const SizedBox(height: 24),
-              
               // SPANISH
               if (!pickingNative || studyLang != 'es')
                 _LanguageButton(
@@ -2966,6 +2979,17 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
                   subLabel: pickingNative ? 'Português' : 'Study Portuguese',
                   color: const Color(0xFFE8F5E9),
                   onTap: () => pickingNative ? _selectNative('pt') : _selectStudy('pt'),
+                ),
+              if (!pickingNative || studyLang != 'pt') const SizedBox(height: 24),
+
+              // UKRAINIAN
+              if (!pickingNative || studyLang != 'uk')
+                _LanguageButton(
+                  flag: '🇺🇦',
+                  label: 'Ukrainian',
+                  subLabel: pickingNative ? 'Українська' : 'Study Ukrainian',
+                  color: const Color(0xFFE3F2FD),
+                  onTap: () => pickingNative ? _selectNative('uk') : _selectStudy('uk'),
                 ),
 
               if (pickingNative) ...[
