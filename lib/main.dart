@@ -1,8 +1,9 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 // import 'home_page.dart'; // <-- import your splash page
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'dart:typed_data';
+import 'dart:ui' show ImageFilter;
 import 'package:csv/csv.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'dart:convert';
@@ -56,7 +57,7 @@ class _WordsAppState extends State<WordsApp> {
     }
 
     return MaterialApp(
-      title: 'English Words Trainer',
+      title: 'Volary - Vocabulary Trainer',
       debugShowCheckedModeBanner: false,
       // If language is set -> HomeSplashPage (which goes to Flashcards)
       // If not set -> LanguageSelectionScreen
@@ -1741,10 +1742,10 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     required bool darkTheme,
   }) {
     const options = <Map<String, String>>[
-      {'code': 'en', 'label': 'English', 'native': 'English', 'flag': '🇺🇸'},
-      {'code': 'es', 'label': 'Spanish', 'native': 'Español', 'flag': '🇪🇸'},
-      {'code': 'pt', 'label': 'Portuguese', 'native': 'Português', 'flag': '🇵🇹'},
-      {'code': 'uk', 'label': 'Ukrainian', 'native': 'Українська', 'flag': '🇺🇦'},
+      {'code': 'en', 'label': 'English', 'native': 'English', 'flag': 'ðŸ‡ºðŸ‡¸'},
+      {'code': 'es', 'label': 'Spanish', 'native': 'EspaÃ±ol', 'flag': 'ðŸ‡ªðŸ‡¸'},
+      {'code': 'pt', 'label': 'Portuguese', 'native': 'PortuguÃªs', 'flag': 'ðŸ‡µðŸ‡¹'},
+      {'code': 'uk', 'label': 'Ukrainian', 'native': 'Ð£ÐºÑ€Ð°Ñ—Ð½ÑÑŒÐºÐ°', 'flag': 'ðŸ‡ºðŸ‡¦'},
     ];
 
     Map<String, String> byCode(String code) =>
@@ -2116,8 +2117,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
 
   void _showCustomListDialog({bool setAsTarget = false}) {
     final TextEditingController listNameController = TextEditingController();
-    final TextEditingController wordsController = TextEditingController();
-    final String studyLabel = studyLang.toUpperCase();
+    const accentBlue = Color(0xFF1A237E);
 
     showDialog(
       context: context,
@@ -2129,19 +2129,24 @@ class _FlashcardScreenState extends State<FlashcardScreen>
             children: [
               TextField(
                 controller: listNameController,
+                style: const TextStyle(fontSize: 18),
                 decoration: InputDecoration(
                   labelText: 'List Name',
                   hintText: 'My Custom List',
+                  labelStyle: const TextStyle(
+                    color: accentBlue,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
               SizedBox(height: 16),
-              TextField(
-                controller: wordsController,
-                decoration: InputDecoration(
-                  labelText: 'Words ($studyLabel)',
-                  hintText: 'Enter words separated by commas or new lines',
+              Text(
+                'Tip: add words to this custom list from other lists by saving/favoriting them, then choose this list in â€œsave to custom listâ€.',
+                style: TextStyle(
+                  color: Colors.black.withValues(alpha: 0.55),
+                  fontSize: 14,
                 ),
-                maxLines: 10,
               ),
             ],
           ),
@@ -2149,21 +2154,30 @@ class _FlashcardScreenState extends State<FlashcardScreen>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text('Cancel'),
+            style: TextButton.styleFrom(
+              foregroundColor: accentBlue,
+              textStyle: const TextStyle(fontSize: 18),
+            ),
+            child: const Text('Cancel'),
           ),
           ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: accentBlue,
+              foregroundColor: Colors.white,
+              textStyle: const TextStyle(fontSize: 18),
+            ),
             onPressed: () {
               // --- CHANGE THIS CONDITION ---
               if (listNameController.text.isNotEmpty) {
                 _createCustomList(
                   listNameController.text.trim(),
-                  wordsController.text.trim(), // This can now be empty
+                  '',
                   setAsTarget: setAsTarget,
                 );
                 Navigator.pop(context);
               }
             },
-            child: Text('Create'),
+            child: const Text('Create'),
           ),
         ],
       ),
@@ -2719,7 +2733,7 @@ class _WordsMenuButton extends StatelessWidget {
 
 class _WordsMenuPanel extends StatefulWidget {
   final Map<String, List<String>> groupedLists;
-  final String activeLevel; // which level’s sublists to show
+  final String activeLevel; // which levelâ€™s sublists to show
   final String currentLevel; // currently selected level
   final String currentSublist; // currently selected sublist
   final ValueChanged<String> onChangeLevel;
@@ -3018,34 +3032,55 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
 
   @override
   Widget build(BuildContext context) {
-    bool pickingNative = studyLang != null;
+    final bool pickingNative = studyLang != null;
 
     return Scaffold(
       backgroundColor: Colors.white,
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 260),
+        switchInCurve: Curves.easeOut,
+        switchOutCurve: Curves.easeIn,
+        transitionBuilder: (child, animation) {
+          final blur = Tween<double>(begin: 6.0, end: 0.0).animate(animation);
+          final fade = Tween<double>(begin: 0.4, end: 1.0).animate(animation);
+          return FadeTransition(
+            opacity: fade,
+            child: AnimatedBuilder(
+              animation: blur,
+              builder: (context, _) => ImageFiltered(
+                imageFilter: ImageFilter.blur(
+                  sigmaX: blur.value,
+                  sigmaY: blur.value,
+                ),
+                child: child,
+              ),
+            ),
+          );
+        },
+        child: KeyedSubtree(
+          key: ValueKey(pickingNative),
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(
-                pickingNative ? 'Your native language?' : 'What language to learn?',
-                style: const TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF1A237E),
-                  fontFamily: 'Inter',
-                ),
-                textAlign: TextAlign.center,
+              _TitlePill(
+                text: pickingNative
+                    ? 'Your native language?'
+                    : 'What language to learn?',
+                backgroundColor: pickingNative
+                    ? const Color(0xFFE8F5E9) // soft light green
+                    : const Color(0xFFE3F2FD), // light blue
               ),
               const SizedBox(height: 48),
-              
+
               // ENGLISH (only if not picking native English while study is English)
               if (!pickingNative || studyLang != 'en')
                 _LanguageButton(
-                  flag: '🇺🇸',
+                  flag: 'ðŸ‡ºðŸ‡¸',
                   label: 'English',
-                  subLabel: pickingNative ? 'Англійська / Inglés' : 'Study English',
+                  subLabel: pickingNative ? 'ÐÐ½Ð³Ð»Ñ–Ð¹ÑÑŒÐºÐ° / InglÃ©s' : 'Study English',
                   color: const Color(0xFFE8EAF6),
                   onTap: () => pickingNative ? _selectNative('en') : _selectStudy('en'),
                 ),
@@ -3055,9 +3090,9 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
               // SPANISH
               if (!pickingNative || studyLang != 'es')
                 _LanguageButton(
-                  flag: '🇪🇸',
+                  flag: 'ðŸ‡ªðŸ‡¸',
                   label: 'Spanish',
-                  subLabel: pickingNative ? 'Español' : 'Study Spanish',
+                  subLabel: pickingNative ? 'EspaÃ±ol' : 'Study Spanish',
                   color: const Color(0xFFFFF3E0),
                   onTap: () => pickingNative ? _selectNative('es') : _selectStudy('es'),
                 ),
@@ -3066,9 +3101,9 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
               // PORTUGUESE
               if (!pickingNative || studyLang != 'pt')
                 _LanguageButton(
-                  flag: '🇵🇹',
+                  flag: 'ðŸ‡µðŸ‡¹',
                   label: 'Portuguese',
-                  subLabel: pickingNative ? 'Português' : 'Study Portuguese',
+                  subLabel: pickingNative ? 'PortuguÃªs' : 'Study Portuguese',
                   color: const Color(0xFFE8F5E9),
                   onTap: () => pickingNative ? _selectNative('pt') : _selectStudy('pt'),
                 ),
@@ -3077,9 +3112,9 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
               // UKRAINIAN
               if (!pickingNative || studyLang != 'uk')
                 _LanguageButton(
-                  flag: '🇺🇦',
+                  flag: 'ðŸ‡ºðŸ‡¦',
                   label: 'Ukrainian',
-                  subLabel: pickingNative ? 'Українська' : 'Study Ukrainian',
+                  subLabel: pickingNative ? 'Ð£ÐºÑ€Ð°Ñ—Ð½ÑÑŒÐºÐ°' : 'Study Ukrainian',
                   color: const Color(0xFFE3F2FD),
                   onTap: () => pickingNative ? _selectNative('uk') : _selectStudy('uk'),
                 ),
@@ -3088,11 +3123,54 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
                  const SizedBox(height: 32),
                  TextButton(
                     onPressed: () => setState(() => studyLang = null),
-                    child: const Text('← Back to Study Language'),
+                    child: const Text('â† Back to Study Language'),
                  )
               ]
             ],
           ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TitlePill extends StatelessWidget {
+  final String text;
+  final Color backgroundColor;
+
+  const _TitlePill({
+    required this.text,
+    required this.backgroundColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+        child: Text(
+          text,
+          style: const TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF1A237E),
+            fontFamily: 'Inter',
+          ),
+          textAlign: TextAlign.center,
         ),
       ),
     );
@@ -3168,3 +3246,4 @@ class _LanguageButton extends StatelessWidget {
     );
   }
 }
+
