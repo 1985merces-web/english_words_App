@@ -97,7 +97,6 @@ A1,A1L1,serviço,assistência
 A1,A1L1,país,nação
 A1,A1L1,abrir,destrancado
 A1,A1L1,estação,período
-A1,A1L1,merda,fezes
 A1,A1L1,agradecer,apreciar
 A1,A1L1,criança,menino
 A1,A1L1,geral,comum
@@ -146,7 +145,6 @@ A1,A1L1,pagar,compensar
 A1,A1L1,problema,questão
 A1,A1L1,sul,baixo
 A1,A1L1,verdadeiro,genuíno
-A1,A1L1,transar,fazer sexo
 A1,A1L1,história,crônica
 A1,A1L1,grande,grande
 A1,A1L1,perder,desaparecer
@@ -184,7 +182,6 @@ A1,A1L1,tarde,atrasado
 A1,A1L1,norte,cima
 A1,A1L1,especial,único
 A1,A1L1,assistir,observar
-A1,A1L1,maldito,droga
 A1,A1L1,futuro,subsequente
 A1,A1L1,luz,brilho
 A1,A1L1,baixo,pequeno
@@ -272,11 +269,9 @@ A1,A1L2,termo,período
 A1,A1L2,esposa,cônjuge
 A1,A1L2,belo,bonito
 A1,A1L2,data,dia
-A1,A1L2,matar,assassinar
 A1,A1L2,terra,solo
 A1,A1L2,perder,ignorar
 A1,A1L2,projeto,plano
-A1,A1L2,sexo,gênero
 A1,A1L2,atirar,disparar
 A1,A1L2,local,localização
 A1,A1L2,forte,poderoso
@@ -784,7 +779,6 @@ A2,A2L2,pele,epiderme
 A2,A2L2,supor,assumir
 A2,A2L2,doce,gentil
 A2,A2L2,tocar,contato
-A2,A2L2,ontem,anteriormente
 A2,A2L2,pegar,capturar
 A2,A2L2,dano,prejuízo
 A2,A2L2,diretamente,direto
@@ -957,7 +951,6 @@ A2,A2L3,estranho,esquisito
 A2,A2L3,adulto,crescido
 A2,A2L3,aparentemente,evidentemente
 A2,A2L3,artista,criador
-A2,A2L3,presidente,líder
 A2,A2L3,engenharia,tecnologia
 A2,A2L3,nota,nível
 A2,A2L3,saudável,em forma
@@ -1099,7 +1092,6 @@ A2,A2L4,céu,céus
 A2,A2L4,ensinar,educar
 A2,A2L4,transferir,mover
 A2,A2L4,superior,mais alto
-A2,A2L4,útil,prestativo
 A2,A2L4,disposto,pronto
 A2,A2L4,zona,área
 A2,A2L4,acidente,incidente
@@ -1305,7 +1297,6 @@ A2,A2L5,contexto,situação
 A2,A2L5,cobertura,extensão
 A2,A2L5,exibir,expor
 A2,A2L5,eleger,escolher
-A2,A2L5,falso,não verdadeiro
 A2,A2L5,identificar,reconhecer
 A2,A2L5,incrível,inacreditável
 A2,A2L5,inspirar,motivar
@@ -1369,7 +1360,6 @@ A2,A2L5,crise,emergência
 A2,A2L5,entregar,enviar
 A2,A2L5,editor,publicador
 A2,A2L5,estimar,calcular
-A2,A2L5,gigante,enorme
 A2,A2L5,prisão,prisão
 A2,A2L5,literatura,escrita
 A2,A2L5,prefeito,líder
@@ -2098,7 +2088,6 @@ B1,B1L4,colisão,batida
 B1,B1L4,botão,fecho
 B1,B1L4,carrinho,trole
 B1,B1L4,circo,espetáculo
-B1,B1L4,cocaína,droga
 B1,B1L4,convincente,persuasivo
 B1,B1L4,compilar,montar
 B1,B1L4,complicação,dificuldade
@@ -2843,7 +2832,6 @@ B1,B1L7,carvão,carbono
 B1,B1L7,cor,matiz
 B1,B1L7,crítica,avaliação
 B1,B1L7,extensivo,abrangente
-B1,B1L7,formação,criação
 B1,B1L7,rodovia,estrada
 B1,B1L7,histórico,significativo
 B1,B1L7,caçar,buscar
@@ -3484,7 +3472,6 @@ B1,B1L11,deslumbrante,surpreendente
 B1,B1L11,melodia,melodia
 B1,B1L11,utilidade,utilidade
 B1,B1L11,embarcação,recipiente
-B1,B1L11,erva daninha,planta
 B1,B1L11,aquisição,compra
 B1,B1L11,ousado,corajoso
 B1,B1L11,clássico,tradicional
@@ -4241,8 +4228,6 @@ B2,B2L1,formiga,inseto
 B2,B2L1,antártico,polar
 B2,B2L1,antologia,coleção
 B2,B2L1,antropologia,ciência humana
-B2,B2L1,antibiótico,medicamento
-B2,B2L1,anticorpo,proteína
 B2,B2L1,antecipação,expectativa
 B2,B2L1,antigo,antigo
 B2,B2L1,admitidamente,confessadamente
@@ -4323,7 +4308,6 @@ B2,B2L2,autorização,permissão
 B2,B2L2,autista,TEA
 B2,B2L2,autobiografia,história de vida
 B2,B2L2,automação,mecanização
-B2,B2L2,autônomo,independente
 B2,B2L2,autonomia,autogoverno
 B2,B2L2,cevada,grão
 B2,B2L2,barão,nobre
@@ -5037,7 +5021,6 @@ B2,B2L5,desqualificar,eliminar
 B2,B2L5,desconsiderar,ignorar
 B2,B2L5,desrespeito,grosseria
 B2,B2L5,desrespeitoso,indelicado
-B2,B2L5,interromper,interromper
 B2,B2L5,interrupção,perturbação
 B2,B2L5,perturbador,problemático
 B2,B2L5,dissidência,discordância
@@ -5295,7 +5278,6 @@ B2,B2L7,fortaleza,reduto
 B2,B2L7,fórum,discussão
 B2,B2L7,para frente,adiante
 B2,B2L7,quatorze,14
-B2,B2L7,fratura,quebra
 B2,B2L7,frágil,delicado
 B2,B2L7,fragmento,pedaço
 B2,B2L7,fraternidade,irmandade
@@ -5489,7 +5471,6 @@ B2,B2L8,farsa,decepção
 B2,B2L8,porco,suíno
 B2,B2L8,santidade,sacralidade
 B2,B2L8,holocausto,genocídio
-B2,B2L8,homenagem,tributo
 B2,B2L8,retorno,volta
 B2,B2L8,desabrigo,miséria
 B2,B2L8,caseiro,artesanal
@@ -5964,7 +5945,6 @@ B2,B2L10,multijogador,cooperativa
 B2,B2L10,multidão,multidão
 B2,B2L10,mundano,comum
 B2,B2L10,município,localidade
-B2,B2L10,assassino,assassino
 B2,B2L10,musculoso,forte
 B2,B2L10,museu,galeria
 B2,B2L10,cogumelo,fungo
@@ -6101,7 +6081,6 @@ B2,B2L11,portaria,lei
 B2,B2L11,organismo,sendo
 B2,B2L11,organizacional,estrutural
 B2,B2L11,organizador,arranjador
-B2,B2L11,orgasmo,clímax
 B2,B2L11,oriental,leste
 B2,B2L11,originar,começar
 B2,B2L11,órfão,abandonar
@@ -6285,7 +6264,6 @@ B2,B2L12,pipoca,lanche
 B2,B2L12,povoar,habitar
 B2,B2L12,porcelana,cerâmica
 B2,B2L12,varanda,varanda
-B2,B2L12,pornografia,adulto
 B2,B2L12,retratar,retratar
 B2,B2L12,retrato,representação
 B2,B2L12,positivamente,definitivamente
@@ -6380,8 +6358,6 @@ B2,B2L12,prospectivo,potencial
 B2,B2L12,prosperar,prosperar
 B2,B2L12,próspero,rico
 B2,B2L12,próstata,glândula
-B2,B2L12,prostituta,trabalhadora sexual
-B2,B2L12,prostituição,trabalho sexual
 B2,B2L12,protagonista,personagem principal
 B2,B2L12,protetor,guardião
 B2,B2L12,protestante,reformador
@@ -6446,7 +6422,6 @@ B2,B2L12,rampa,inclinar
 B2,B2L12,desenfreado,difundido
 B2,B2L12,resgate,pagamento
 B2,B2L12,discurso retórico,diatribe
-B2,B2L12,estuprador,agressor
 B2,B2L12,raptor,pássaro
 B2,B2L12,erupção cutânea,erupção
 B2,B2L12,framboesa,baga
@@ -6765,7 +6740,6 @@ B2,B2L14,cético,duvidoso
 B2,B2L14,saia,vestido
 B2,B2L14,horizonte,horizonte
 B2,B2L14,folga,solto
-B2,B2L14,morto,morto
 B2,B2L14,bater,greve
 B2,B2L14,barra,cortar
 B2,B2L14,ardósia,tabuleiro
@@ -7331,7 +7305,6 @@ B2,B2L17,sussurrar,murmurar
 B2,B2L17,assobiar,golpe
 B2,B2L17,saudável,saudável
 B2,B2L17,totalmente,inteiramente
-B2,B2L17,prostituta,prostituta
 B2,B2L17,postigo,portão
 B2,B2L17,ampliar,expandir
 B2,B2L17,peruca,peruca
@@ -8297,7 +8270,6 @@ C1,C1L5,de forma confiável,de forma confiável
 C1,C1L5,semântico,significativo
 C1,C1L5,validar,confirmar
 C1,C1L5,anonimato,anônimo
-C1,C1L5,assassinar,assassinato
 C1,C1L5,banir,exílio
 C1,C1L5,conceder,dar
 C1,C1L5,brilho,brilho
@@ -9219,7 +9191,6 @@ C2,C2L5,embelezar,decorar
 C2,C2L5,enfático,forte
 C2,C2L5,inscrição,registro
 C2,C2L5,exclamação,interjeição
-C2,C2L5,carrasco,assassino
 C2,C2L5,exercer,aplicar
 C2,C2L5,via expressa,rodovia
 C2,C2L5,mais justo,mais apenas

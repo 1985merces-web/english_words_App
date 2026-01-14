@@ -1,4 +1,20 @@
-﻿plugins {
+import java.io.FileInputStream
+import java.util.Properties
+
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+val isReleaseTask =
+    gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }
+
+if (isReleaseTask && !keystorePropertiesFile.exists()) {
+    error("Missing android/key.properties for release signing. Create it to build signed release bundles/APKs.")
+}
+
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+}
+
+plugins {
     id("com.android.application")
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
@@ -9,6 +25,8 @@ android {
     namespace = "com.mrcsglobal.volary"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
+
+    flavorDimensions += "dist"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -30,11 +48,35 @@ android {
         versionName = flutter.versionName
     }
 
+    productFlavors {
+        create("play") {
+            dimension = "dist"
+            applicationId = "com.mrcsglobal.volary"
+        }
+        create("site") {
+            dimension = "dist"
+            applicationId = "com.mrcsglobal.volary.site"
+        }
+    }
+
+    signingConfigs {
+        create("release") {
+            val storeFilePath =
+                (keystoreProperties["storeFile"] as String?) ?: error("Missing storeFile in android/key.properties")
+            storeFile = rootProject.file(storeFilePath)
+            storePassword =
+                (keystoreProperties["storePassword"] as String?)
+                    ?: error("Missing storePassword in android/key.properties")
+            keyAlias =
+                (keystoreProperties["keyAlias"] as String?) ?: error("Missing keyAlias in android/key.properties")
+            keyPassword =
+                (keystoreProperties["keyPassword"] as String?) ?: error("Missing keyPassword in android/key.properties")
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }

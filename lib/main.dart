@@ -1,7 +1,7 @@
 ﻿import 'package:flutter/material.dart';
 // import 'home_page.dart'; // <-- import your splash page
 import 'package:flutter_svg/flutter_svg.dart';
-import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter/services.dart' show rootBundle, SystemUiOverlayStyle;
 import 'dart:typed_data';
 import 'dart:ui' show ImageFilter;
 import 'package:csv/csv.dart';
@@ -9,6 +9,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 void main() {
   runApp(const WordsApp());
@@ -90,6 +91,13 @@ class WordEntry {
   WordEntry(this.level, this.sublist, this.wordMain, this.trans1, 
       [this.example1 = '', this.example2 = '', this.example3 = '', 
        this.example4 = '', this.wordSyn = '', this.trans2 = '']);
+}
+
+SystemUiOverlayStyle _overlayStyleForTop({required bool darkTop}) {
+  return SystemUiOverlayStyle(
+    statusBarIconBrightness: darkTop ? Brightness.light : Brightness.dark,
+    statusBarBrightness: darkTop ? Brightness.dark : Brightness.light,
+  );
 }
 
 class FlashcardScreen extends StatefulWidget {
@@ -333,6 +341,10 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     if (langCode == 'uk') ttsLang = "uk-UA";
     if (langCode == 'es') ttsLang = "es-ES";
     if (langCode == 'pt') ttsLang = "pt-PT";
+    if (langCode == 'de') ttsLang = "de-DE";
+    if (langCode == 'fr') ttsLang = "fr-FR";
+    if (langCode == 'it') ttsLang = "it-IT";
+    if (langCode == 'tr') ttsLang = "tr-TR";
     
     await flutterTts.setLanguage(ttsLang);
     await flutterTts.setSpeechRate(0.5);
@@ -519,10 +531,13 @@ class _FlashcardScreenState extends State<FlashcardScreen>
   Widget build(BuildContext context) {
     // Show a loading indicator if still loading
     if (isLoading) {
-      return Scaffold(
-        backgroundColor: darkTheme ? const Color(0xFF1E2A3A) : Colors.white,
-        body: const Center(
-          child: CircularProgressIndicator(),
+      return AnnotatedRegion<SystemUiOverlayStyle>(
+        value: _overlayStyleForTop(darkTop: darkTheme),
+        child: Scaffold(
+          backgroundColor: darkTheme ? const Color(0xFF1E2A3A) : Colors.white,
+          body: const Center(
+            child: CircularProgressIndicator(),
+          ),
         ),
       );
     }
@@ -804,7 +819,6 @@ class _FlashcardScreenState extends State<FlashcardScreen>
         ],
       ),
     );
-
     Widget gridCard(WordEntry entry, int idx) {
       bool isEN = gridCardENFace[idx];
       return GestureDetector(
@@ -1238,11 +1252,53 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                     onChanged: (v) => setState(() => darkTheme = v),
                     darkTheme: darkTheme,
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 18),
                   const Divider(),
                   const SizedBox(height: 10),
                   // Pass the setMenuState function to the build method
                   _buildSaveToSection(darkTheme, setMenuState),
+                  const SizedBox(height: 12),
+                  const Divider(),
+                  const SizedBox(height: 14),
+                  Text(
+                    'Legal',
+                    style: TextStyle(
+                      color: darkTheme ? Colors.white70 : Colors.black54,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  _settingsRow(
+                    icon: Icon(
+                      Icons.privacy_tip_outlined,
+                      size: 32,
+                      color: darkTheme ? Colors.white60 : Colors.black38,
+                    ),
+                    label: 'Privacy Policy',
+                    value: false,
+                    onChanged: (_) => _openLegalUrl(_privacyPolicyUrl),
+                    darkTheme: darkTheme,
+                    isButton: true,
+                    labelColor: darkTheme ? Colors.white60 : Colors.black38,
+                    chevronColor: darkTheme ? Colors.white60 : Colors.black38,
+                  ),
+                  const SizedBox(height: 12),
+                  _settingsRow(
+                    icon: Icon(
+                      Icons.description_outlined,
+                      size: 32,
+                      color: darkTheme ? Colors.white60 : Colors.black38,
+                    ),
+                    label: 'Terms of Use',
+                    value: false,
+                    onChanged: (_) => _openLegalUrl(_termsUrl),
+                    darkTheme: darkTheme,
+                    isButton: true,
+                    labelColor: darkTheme ? Colors.white60 : Colors.black38,
+                    chevronColor: darkTheme ? Colors.white60 : Colors.black38,
+                  ),
                   const SizedBox(height: 10),
                 ],
               ),
@@ -1252,284 +1308,286 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       ),
     );
 
-    return Scaffold(
-      backgroundColor: darkTheme ? const Color(0xFF1E2A3A) : Colors.white,
-      // [MODIFIED] Removed SafeArea wrapper to allow edge-to-edge content
-      body: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          // --- LAYER 1: CONTENT (SCROLLABLE GRID/CARD) ---
-          Positioned.fill(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final contentPadding = EdgeInsets.only(
-                  top: appBarTotalHeight + 12.0,
-                  bottom: bottomBarHeight + bottomSafePadding + 16.0,
-                );
-                final contentMinHeight = math.max(
-                  0.0,
-                  constraints.maxHeight -
-                      contentPadding.top -
-                      contentPadding.bottom,
-                );
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: _overlayStyleForTop(darkTop: true),
+      child: Scaffold(
+        backgroundColor: darkTheme ? const Color(0xFF1E2A3A) : Colors.white,
+        // [MODIFIED] Removed SafeArea wrapper to allow edge-to-edge content
+        body: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            // --- LAYER 1: CONTENT (SCROLLABLE GRID/CARD) ---
+            Positioned.fill(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final contentPadding = EdgeInsets.only(
+                    top: appBarTotalHeight + 12.0,
+                    bottom: bottomBarHeight + bottomSafePadding + 16.0,
+                  );
+                  final contentMinHeight = math.max(
+                    0.0,
+                    constraints.maxHeight -
+                        contentPadding.top -
+                        contentPadding.bottom,
+                  );
 
-                if (gridMode) {
-                  return Padding(
+                  if (gridMode) {
+                    return Padding(
+                      padding: contentPadding,
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(minHeight: contentMinHeight),
+                        child: Center(
+                          child: buildGridView(availableHeight: contentMinHeight),
+                        ),
+                      ),
+                    );
+                  }
+
+                  return SingleChildScrollView(
                     padding: contentPadding,
                     child: ConstrainedBox(
                       constraints: BoxConstraints(minHeight: contentMinHeight),
                       child: Center(
-                        child: buildGridView(availableHeight: contentMinHeight),
+                        child: GestureDetector(
+                          onHorizontalDragEnd: (details) {
+                            if (details.primaryVelocity != null) {
+                              if (details.primaryVelocity! < 0) {
+                                setState(() {
+                                  if (currentSetWords.isNotEmpty) {
+                                    currentIndex = (currentIndex + 1) %
+                                        currentSetWords.length;
+                                  }
+                                  showENFace = widget.showENasDefault;
+                                });
+                              } else if (details.primaryVelocity! > 0) {
+                                setState(() {
+                                  if (currentSetWords.isNotEmpty) {
+                                    currentIndex = (currentIndex -
+                                            1 +
+                                            currentSetWords.length) %
+                                        currentSetWords.length;
+                                  }
+                                  showENFace = widget.showENasDefault;
+                                });
+                              }
+                            }
+                          },
+                          child: singleCardView,
+                        ),
                       ),
                     ),
                   );
-                }
-
-                return SingleChildScrollView(
-                  padding: contentPadding,
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(minHeight: contentMinHeight),
-                    child: Center(
-                      child: GestureDetector(
-                        onHorizontalDragEnd: (details) {
-                          if (details.primaryVelocity != null) {
-                            if (details.primaryVelocity! < 0) {
-                              setState(() {
-                                if (currentSetWords.isNotEmpty) {
-                                  currentIndex = (currentIndex + 1) %
-                                      currentSetWords.length;
-                                }
-                                showENFace = widget.showENasDefault;
-                              });
-                            } else if (details.primaryVelocity! > 0) {
-                              setState(() {
-                                if (currentSetWords.isNotEmpty) {
-                                  currentIndex = (currentIndex -
-                                          1 +
-                                          currentSetWords.length) %
-                                      currentSetWords.length;
-                                }
-                                showENFace = widget.showENasDefault;
-                              });
-                            }
-                          }
-                        },
-                        child: singleCardView,
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-
-          // --- LAYER 2: TOP BAR (PINNED) ---
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: Container(
-              width: double.infinity,
-              height: appBarTotalHeight,
-              decoration: const BoxDecoration(
-                color: Color(0xFF1A237E),
+                },
               ),
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(20, topSafePadding + 8, 20, 16),
+            ),
+
+            // --- LAYER 2: TOP BAR (PINNED) ---
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                width: double.infinity,
+                height: appBarTotalHeight,
+                decoration: const BoxDecoration(
+                  color: Color(0xFF1A237E),
+                ),
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(20, topSafePadding + 8, 20, 16),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          gridMode
+                              ? 'Cards ${currentSetWords.isEmpty ? 0 : (gridPage * _cardsPerGridPage + 1)} / ${currentSetWords.length}'
+                              : 'Cards ${currentSetWords.isEmpty ? 0 : (currentIndex + 1)} / ${currentSetWords.length}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontFamily: 'Inter',
+                            fontWeight: FontWeight.w600,
+                            fontSize: 18,
+                            letterSpacing: 0.3,
+                          ),
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            showSettingsMenu = !showSettingsMenu;
+                          });
+                        },
+                        child: Container(
+                          height: 44,
+                          width: 44,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Center(
+                            child: SvgPicture.asset(
+                              'assets/icons/settings.svg',
+                              width: 26,
+                              height: 26,
+                              colorFilter: const ColorFilter.mode(
+                                  Colors.white, BlendMode.srcIn),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      _WordsMenuButton(
+                        groupedLists: getGroupedLists(),
+                        currentLevel: selectedLevel,
+                        currentSublist: selectedSublist,
+                        onOpen: () {
+                          setState(() {
+                            panelActiveLevel = selectedLevel.isNotEmpty
+                                ? selectedLevel
+                                : (getGroupedLists().keys.isNotEmpty
+                                    ? getGroupedLists().keys.first
+                                    : '');
+                            showWordsMenu = !showWordsMenu;
+                            showSettingsMenu = false;
+                          });
+                        },
+                        onSelect: (level, sublist) {
+                          setState(() {
+                            selectedLevel = level;
+                            selectedSublist = sublist;
+                            filterCurrentSet();
+                            showWordsMenu = false;
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            // --- LAYER 3: BOTTOM BAR (PINNED) ---
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                width: double.infinity,
+                // [MODIFIED] Height includes safe area
+                height: bottomBarHeight + bottomSafePadding,
+                // [MODIFIED] Padding for safe area
+                padding: EdgeInsets.only(
+                    left: 24,
+                    right: 24,
+                    bottom: bottomSafePadding > 0 ? bottomSafePadding : 0),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(30)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.08),
+                      blurRadius: 20,
+                      offset: const Offset(0, -6),
+                    ),
+                  ],
+                ),
                 child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     Expanded(
-                      child: Text(
-                        gridMode
-                            ? 'Cards ${currentSetWords.isEmpty ? 0 : (gridPage * _cardsPerGridPage + 1)} / ${currentSetWords.length}'
-                            : 'Cards ${currentSetWords.isEmpty ? 0 : (currentIndex + 1)} / ${currentSetWords.length}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontFamily: 'Inter',
-                          fontWeight: FontWeight.w600,
-                          fontSize: 18,
-                          letterSpacing: 0.3,
+                      child: bottomAction(
+                        onTap: () {
+                          setState(() {
+                            gridMode = !gridMode;
+                          });
+                        },
+                        child: SvgPicture.asset(
+                          'assets/icons/Grid.svg',
+                          width: 32,
+                          height: 32,
                         ),
                       ),
                     ),
-                    GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          showSettingsMenu = !showSettingsMenu;
-                        });
-                      },
-                      child: Container(
-                        height: 44,
-                        width: 44,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Center(
-                          child: SvgPicture.asset(
-                            'assets/icons/settings.svg',
-                            width: 26,
-                            height: 26,
-                            colorFilter: const ColorFilter.mode(
-                                Colors.white, BlendMode.srcIn),
+                    Expanded(
+                      child: bottomAction(
+                        onTap: () {
+                          widget.onToggleDefault();
+                          setState(() {
+                            showENFace = !showENFace;
+                            gridCardENFace =
+                                List.filled(_cardsPerGridPage, showENFace);
+                          });
+                        },
+                        child: Container(
+                          width: 48,
+                          height: 36,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF1F3F8),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            showENFace ? studyLang.toUpperCase() : nativeLang.toUpperCase(),
+                            strutStyle: const StrutStyle(
+                              forceStrutHeight: true,
+                              height: 1.0,
+                            ),
+                            style: const TextStyle(
+                              color: Color(0xFF1A237E),
+                              fontFamily: 'Inter',
+                              fontWeight: FontWeight.w700,
+                              fontSize: 16,
+                              height: 1.0,
+                            ),
+                            textAlign: TextAlign.center,
                           ),
                         ),
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    _WordsMenuButton(
-                      groupedLists: getGroupedLists(),
-                      currentLevel: selectedLevel,
-                      currentSublist: selectedSublist,
-                      onOpen: () {
-                        setState(() {
-                          panelActiveLevel = selectedLevel.isNotEmpty
-                              ? selectedLevel
-                              : (getGroupedLists().keys.isNotEmpty
-                                  ? getGroupedLists().keys.first
-                                  : '');
-                          showWordsMenu = !showWordsMenu;
-                          showSettingsMenu = false;
-                        });
-                      },
-                      onSelect: (level, sublist) {
-                        setState(() {
-                          selectedLevel = level;
-                          selectedSublist = sublist;
-                          filterCurrentSet();
-                          showWordsMenu = false;
-                        });
-                      },
+                    Expanded(
+                      child: bottomAction(
+                        onTap: () {
+                          if (!isPlaying) {
+                            playSetWords();
+                          } else {
+                            stopPlaying();
+                          }
+                        },
+                        child: SvgPicture.asset(
+                          'assets/icons/Play circle.svg',
+                          width: 32,
+                          height: 32,
+                          colorFilter: isPlaying
+                              ? const ColorFilter.mode(
+                                  Colors.green, BlendMode.srcIn)
+                              : null,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: bottomAction(
+                        onTap: () {
+                          if (currentSetWords.isNotEmpty) {
+                            setState(() {
+                              showSlider = !showSlider;
+                              sliderValue = gridMode
+                                  ? gridPage.toDouble()
+                                  : currentIndex.toDouble();
+                            });
+                          }
+                        },
+                        child: SvgPicture.asset(
+                          'assets/icons/Chevrons right.svg',
+                          width: 32,
+                          height: 32,
+                        ),
+                      ),
                     ),
                   ],
                 ),
               ),
             ),
-          ),
-
-          // --- LAYER 3: BOTTOM BAR (PINNED) ---
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: Container(
-              width: double.infinity,
-              // [MODIFIED] Height includes safe area
-              height: bottomBarHeight + bottomSafePadding,
-              // [MODIFIED] Padding for safe area
-              padding: EdgeInsets.only(
-                  left: 24,
-                  right: 24,
-                  bottom: bottomSafePadding > 0 ? bottomSafePadding : 0),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(30)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.08),
-                    blurRadius: 20,
-                    offset: const Offset(0, -6),
-                  ),
-                ],
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Expanded(
-                    child: bottomAction(
-                      onTap: () {
-                        setState(() {
-                          gridMode = !gridMode;
-                        });
-                      },
-                      child: SvgPicture.asset(
-                        'assets/icons/Grid.svg',
-                        width: 32,
-                        height: 32,
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: bottomAction(
-                      onTap: () {
-                        widget.onToggleDefault();
-                        setState(() {
-                          showENFace = !showENFace;
-                          gridCardENFace =
-                              List.filled(_cardsPerGridPage, showENFace);
-                        });
-                      },
-                      child: Container(
-                        width: 48,
-                        height: 36,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF1F3F8),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          showENFace ? studyLang.toUpperCase() : nativeLang.toUpperCase(),
-                          strutStyle: const StrutStyle(
-                            forceStrutHeight: true,
-                            height: 1.0,
-                          ),
-                          style: const TextStyle(
-                            color: Color(0xFF1A237E),
-                            fontFamily: 'Inter',
-                            fontWeight: FontWeight.w700,
-                            fontSize: 16,
-                            height: 1.0,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: bottomAction(
-                      onTap: () {
-                        if (!isPlaying) {
-                          playSetWords();
-                        } else {
-                          stopPlaying();
-                        }
-                      },
-                      child: SvgPicture.asset(
-                        'assets/icons/Play circle.svg',
-                        width: 32,
-                        height: 32,
-                        colorFilter: isPlaying
-                            ? const ColorFilter.mode(
-                                Colors.green, BlendMode.srcIn)
-                            : null,
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: bottomAction(
-                      onTap: () {
-                        if (currentSetWords.isNotEmpty) {
-                          setState(() {
-                            showSlider = !showSlider;
-                            sliderValue = gridMode
-                                ? gridPage.toDouble()
-                                : currentIndex.toDouble();
-                          });
-                        }
-                      },
-                      child: SvgPicture.asset(
-                        'assets/icons/Chevrons right.svg',
-                        width: 32,
-                        height: 32,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
 
           // --- LAYER 4: SLIDER OVERLAY ---
           if (showSlider && sliderSection is! SizedBox) ...[
@@ -1601,7 +1659,8 @@ class _FlashcardScreenState extends State<FlashcardScreen>
           ],
         ],
       ),
-    );
+    ),
+  );
   }
 
   int _levelOrderIndex(String level) {
@@ -1742,10 +1801,14 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     required bool darkTheme,
   }) {
     const options = <Map<String, String>>[
-      {'code': 'en', 'label': 'English', 'native': 'English', 'flag': 'ðŸ‡ºðŸ‡¸'},
-      {'code': 'es', 'label': 'Spanish', 'native': 'EspaÃ±ol', 'flag': 'ðŸ‡ªðŸ‡¸'},
-      {'code': 'pt', 'label': 'Portuguese', 'native': 'PortuguÃªs', 'flag': 'ðŸ‡µðŸ‡¹'},
-      {'code': 'uk', 'label': 'Ukrainian', 'native': 'Ð£ÐºÑ€Ð°Ñ—Ð½ÑÑŒÐºÐ°', 'flag': 'ðŸ‡ºðŸ‡¦'},
+      {'code': 'en', 'label': 'English', 'native': 'English', 'flag': '\u{1F1FA}\u{1F1F8}'},
+      {'code': 'de', 'label': 'German', 'native': 'Deutsch', 'flag': '\u{1F1E9}\u{1F1EA}'},
+      {'code': 'es', 'label': 'Spanish', 'native': 'Espa\u00F1ol', 'flag': '\u{1F1EA}\u{1F1F8}'},
+      {'code': 'fr', 'label': 'French', 'native': 'Fran\u00E7ais', 'flag': '\u{1F1EB}\u{1F1F7}'},
+      {'code': 'it', 'label': 'Italian', 'native': 'Italiano', 'flag': '\u{1F1EE}\u{1F1F9}'},
+      {'code': 'pt', 'label': 'Portuguese', 'native': 'Portugu\u00EAs', 'flag': '\u{1F1F5}\u{1F1F9}'},
+      {'code': 'tr', 'label': 'Turkish', 'native': 'T\u00FCrk\u00E7e', 'flag': '\u{1F1F9}\u{1F1F7}'},
+      {'code': 'uk', 'label': 'Ukrainian', 'native': '\u0423\u043A\u0440\u0430\u0457\u043D\u0441\u044C\u043A\u0430', 'flag': '\u{1F1FA}\u{1F1E6}'},
     ];
 
     Map<String, String> byCode(String code) =>
@@ -1927,6 +1990,8 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     required ValueChanged<bool> onChanged,
     required bool darkTheme,
     bool isButton = false, // <-- Add this
+    Color? labelColor,
+    Color? chevronColor,
   }) {
     return InkWell(
       // <-- Wrap with InkWell
@@ -1942,7 +2007,8 @@ class _FlashcardScreenState extends State<FlashcardScreen>
               child: Text(
                 label,
                 style: TextStyle(
-                  color: darkTheme ? Colors.white : const Color(0xFF1E1E1E),
+                  color: labelColor ??
+                      (darkTheme ? Colors.white : const Color(0xFF1E1E1E)),
                   fontFamily: 'Inter',
                   fontWeight: FontWeight.w400,
                   fontSize: 21, // -25% from 28
@@ -1953,7 +2019,8 @@ class _FlashcardScreenState extends State<FlashcardScreen>
             // --- CHANGE THIS ---
             if (isButton)
               Icon(Icons.chevron_right,
-                  color: darkTheme ? Colors.white70 : Colors.black54)
+                  color: chevronColor ??
+                      (darkTheme ? Colors.white70 : Colors.black54))
             else
               GestureDetector(
                 onTap: () => onChanged(!value),
@@ -1980,6 +2047,20 @@ class _FlashcardScreenState extends State<FlashcardScreen>
         ),
       ),
     );
+  }
+
+
+  static const String _privacyPolicyUrl = 'https://volary.mrcs-global.com/privacy.html';
+  static const String _termsUrl = 'https://volary.mrcs-global.com/terms.html';
+
+  Future<void> _openLegalUrl(String url) async {
+    final uri = Uri.parse(url);
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open: $url')),
+      );
+    }
   }
 
   // --- ADD THIS NEW WIDGET METHOD ---
@@ -2127,25 +2208,25 @@ class _FlashcardScreenState extends State<FlashcardScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(
-                controller: listNameController,
-                style: const TextStyle(fontSize: 18),
+                TextField(
+                  controller: listNameController,
+                  autofocus: true,
+                  style: const TextStyle(fontSize: 18),
                 decoration: InputDecoration(
                   labelText: 'List Name',
                   hintText: 'My Custom List',
+                  helperText:
+                      'Tip: add words to this custom list from other lists by saving/favoriting them, then choose this list in "save to custom list".',
+                  helperMaxLines: 3,
+                  helperStyle: TextStyle(
+                    color: Colors.black.withValues(alpha: 0.55),
+                    fontSize: 14,
+                  ),
                   labelStyle: const TextStyle(
                     color: accentBlue,
                     fontSize: 18,
                     fontWeight: FontWeight.w600,
                   ),
-                ),
-              ),
-              SizedBox(height: 16),
-              Text(
-                'Tip: add words to this custom list from other lists by saving/favoriting them, then choose this list in â€œsave to custom listâ€.',
-                style: TextStyle(
-                  color: Colors.black.withValues(alpha: 0.55),
-                  fontSize: 14,
                 ),
               ),
             ],
@@ -2279,16 +2360,15 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       // await loadWords();
 
       if (!mounted) return;
-      // Select the new list
+      // Refresh UI to show the new list without switching to it.
       setState(() {
-        selectedLevel = 'custom';
-        selectedSublist = formattedListName;
-        if (setAsTarget) {
-          targetCustomSet = formattedListName;
-          _setTargetCustomSet(formattedListName);
+        if (!allCustomListNames.contains(formattedListName)) {
+          allCustomListNames.add(formattedListName);
         }
-        filterCurrentSet();
       });
+      if (setAsTarget) {
+        _setTargetCustomSet(formattedListName);
+      }
     } catch (e) {
       if (mounted) {
         // Close the loading dialog
@@ -2581,60 +2661,63 @@ class _HomeSplashPageState extends State<HomeSplashPage>
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
 
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          // Liquid Layer Background
-          AnimatedBuilder(
-            animation: _liquidAnimation,
-            builder: (context, child) {
-              // Sliding up from bottom (-100% to -30%)
-              return Positioned(
-                bottom: -size.height * 0.5 + (1.0 - _liquidAnimation.value) * size.height,
-                left: -size.width * 0.2,
-                child: Transform.rotate(
-                  angle: _liquidAnimation.value * 0.26, // approx 15 degrees
-                  child: Container(
-                    width: size.width * 1.4,
-                    height: size.height * 2.5,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF00004D),
-                      borderRadius: BorderRadius.circular(size.width * 0.6),
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: _overlayStyleForTop(darkTop: false),
+      child: Scaffold(
+        backgroundColor: Colors.white,
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            // Liquid Layer Background
+            AnimatedBuilder(
+              animation: _liquidAnimation,
+              builder: (context, child) {
+                // Sliding up from bottom (-100% to -30%)
+                return Positioned(
+                  bottom: -size.height * 0.5 + (1.0 - _liquidAnimation.value) * size.height,
+                  left: -size.width * 0.2,
+                  child: Transform.rotate(
+                    angle: _liquidAnimation.value * 0.26, // approx 15 degrees
+                    child: Container(
+                      width: size.width * 1.4,
+                      height: size.height * 2.5,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF00004D),
+                        borderRadius: BorderRadius.circular(size.width * 0.6),
+                      ),
                     ),
                   ),
-                ),
-              );
-            },
-          ),
-          // Logo Reveal
-          Center(
-            child: ScaleTransition(
-              scale: _logoAnimation,
-              child: FadeTransition(
-                opacity: _logoAnimation,
-                child: const Text(
-                  'vo',
-                  style: TextStyle(
-                    fontSize: 120,
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontStyle: FontStyle.italic,
-                    fontFamily: 'Inter', // Defaulting to Inter as Caveat might not be loaded
-                    shadows: [
-                      Shadow(
-                        color: Colors.black26,
-                        offset: Offset(0, 4),
-                        blurRadius: 10,
-                      ),
-                    ],
+                );
+              },
+            ),
+            // Logo Reveal
+            Center(
+              child: ScaleTransition(
+                scale: _logoAnimation,
+                child: FadeTransition(
+                  opacity: _logoAnimation,
+                  child: const Text(
+                    'vo',
+                    style: TextStyle(
+                      fontSize: 120,
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontStyle: FontStyle.italic,
+                      fontFamily: 'Inter', // Defaulting to Inter as Caveat might not be loaded
+                      shadows: [
+                        Shadow(
+                          color: Colors.black26,
+                          offset: Offset(0, 4),
+                          blurRadius: 10,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -2733,7 +2816,7 @@ class _WordsMenuButton extends StatelessWidget {
 
 class _WordsMenuPanel extends StatefulWidget {
   final Map<String, List<String>> groupedLists;
-  final String activeLevel; // which levelâ€™s sublists to show
+  final String activeLevel; // which level's sublists to show
   final String currentLevel; // currently selected level
   final String currentSublist; // currently selected sublist
   final ValueChanged<String> onChangeLevel;
@@ -2794,15 +2877,15 @@ class _WordsMenuPanelState extends State<_WordsMenuPanel> {
     return a.toLowerCase().compareTo(b.toLowerCase());
   }
 
-  String _fmtSub(String s) {
-    final combinedMatch =
-        RegExp(r'^([A-Za-z]+\d*)L(\d+)$', caseSensitive: false)
-            .firstMatch(s.trim());
-    if (combinedMatch != null) {
-      return 'L${combinedMatch.group(2)}';
-    }
-    final n = _extractListNumber(s);
-    if (n != null) return 'L$n';
+    String _fmtSub(String s) {
+      final combinedMatch =
+          RegExp(r'^([A-Za-z]+\d*)L(\d+)$', caseSensitive: false)
+              .firstMatch(s.trim());
+      if (combinedMatch != null) {
+        return 'List ${combinedMatch.group(2)}';
+      }
+      final n = _extractListNumber(s);
+      if (n != null) return 'List $n';
 
     // Handle custom lists like 'list_custom_my_favorites' -> 'My Favorites'
     if (s.startsWith('list_custom_')) {
@@ -2815,8 +2898,8 @@ class _WordsMenuPanelState extends State<_WordsMenuPanel> {
               : '')
           .join(' ');
     }
-    return s;
-  }
+      return s;
+    }
 
   @override
   Widget build(BuildContext context) {
@@ -3034,9 +3117,11 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
   Widget build(BuildContext context) {
     final bool pickingNative = studyLang != null;
 
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: AnimatedSwitcher(
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: _overlayStyleForTop(darkTop: false),
+      child: Scaffold(
+        backgroundColor: Colors.white,
+        body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 260),
         switchInCurve: Curves.easeOut,
         switchOutCurve: Curves.easeIn,
@@ -3078,21 +3163,53 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
               // ENGLISH (only if not picking native English while study is English)
               if (!pickingNative || studyLang != 'en')
                 _LanguageButton(
-                  flag: 'ðŸ‡ºðŸ‡¸',
+                  flag: '\u{1F1FA}\u{1F1F8}',
                   label: 'English',
-                  subLabel: pickingNative ? 'ÐÐ½Ð³Ð»Ñ–Ð¹ÑÑŒÐºÐ° / InglÃ©s' : 'Study English',
+                  subLabel: pickingNative ? 'English' : 'Study English',
                   color: const Color(0xFFE8EAF6),
                   onTap: () => pickingNative ? _selectNative('en') : _selectStudy('en'),
                 ),
               if (!pickingNative || studyLang != 'en') const SizedBox(height: 24),
 
-              // UKRAINIAN
+              // GERMAN
+              if (!pickingNative || studyLang != 'de')
+                _LanguageButton(
+                  flag: '\u{1F1E9}\u{1F1EA}',
+                  label: 'German',
+                  subLabel: pickingNative ? 'Deutsch' : 'Study German',
+                  color: const Color(0xFFF1F8E9),
+                  onTap: () => pickingNative ? _selectNative('de') : _selectStudy('de'),
+                ),
+              if (!pickingNative || studyLang != 'de') const SizedBox(height: 24),
+
+              // FRENCH
+              if (!pickingNative || studyLang != 'fr')
+                _LanguageButton(
+                  flag: '\u{1F1EB}\u{1F1F7}',
+                  label: 'French',
+                  subLabel: pickingNative ? 'Fran\u00E7ais' : 'Study French',
+                  color: const Color(0xFFE3F2FD),
+                  onTap: () => pickingNative ? _selectNative('fr') : _selectStudy('fr'),
+                ),
+              if (!pickingNative || studyLang != 'fr') const SizedBox(height: 24),
+
+              // ITALIAN
+              if (!pickingNative || studyLang != 'it')
+                _LanguageButton(
+                  flag: '\u{1F1EE}\u{1F1F9}',
+                  label: 'Italian',
+                  subLabel: pickingNative ? 'Italiano' : 'Study Italian',
+                  color: const Color(0xFFFFF3E0),
+                  onTap: () => pickingNative ? _selectNative('it') : _selectStudy('it'),
+                ),
+              if (!pickingNative || studyLang != 'it') const SizedBox(height: 24),
+
               // SPANISH
               if (!pickingNative || studyLang != 'es')
                 _LanguageButton(
-                  flag: 'ðŸ‡ªðŸ‡¸',
+                  flag: '\u{1F1EA}\u{1F1F8}',
                   label: 'Spanish',
-                  subLabel: pickingNative ? 'EspaÃ±ol' : 'Study Spanish',
+                  subLabel: pickingNative ? 'Espa\u00F1ol' : 'Study Spanish',
                   color: const Color(0xFFFFF3E0),
                   onTap: () => pickingNative ? _selectNative('es') : _selectStudy('es'),
                 ),
@@ -3101,20 +3218,31 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
               // PORTUGUESE
               if (!pickingNative || studyLang != 'pt')
                 _LanguageButton(
-                  flag: 'ðŸ‡µðŸ‡¹',
+                  flag: '\u{1F1F5}\u{1F1F9}',
                   label: 'Portuguese',
-                  subLabel: pickingNative ? 'PortuguÃªs' : 'Study Portuguese',
+                  subLabel: pickingNative ? 'Portugu\u00EAs' : 'Study Portuguese',
                   color: const Color(0xFFE8F5E9),
                   onTap: () => pickingNative ? _selectNative('pt') : _selectStudy('pt'),
                 ),
               if (!pickingNative || studyLang != 'pt') const SizedBox(height: 24),
 
+              // TURKISH
+              if (!pickingNative || studyLang != 'tr')
+                _LanguageButton(
+                  flag: '\u{1F1F9}\u{1F1F7}',
+                  label: 'Turkish',
+                  subLabel: pickingNative ? 'T\u00FCrk\u00E7e' : 'Study Turkish',
+                  color: const Color(0xFFE8EAF6),
+                  onTap: () => pickingNative ? _selectNative('tr') : _selectStudy('tr'),
+                ),
+              if (!pickingNative || studyLang != 'tr') const SizedBox(height: 24),
+
               // UKRAINIAN
               if (!pickingNative || studyLang != 'uk')
                 _LanguageButton(
-                  flag: 'ðŸ‡ºðŸ‡¦',
+                  flag: '\u{1F1FA}\u{1F1E6}',
                   label: 'Ukrainian',
-                  subLabel: pickingNative ? 'Ð£ÐºÑ€Ð°Ñ—Ð½ÑÑŒÐºÐ°' : 'Study Ukrainian',
+                  subLabel: pickingNative ? '\u0423\u043A\u0440\u0430\u0457\u043D\u0441\u044C\u043A\u0430' : 'Study Ukrainian',
                   color: const Color(0xFFE3F2FD),
                   onTap: () => pickingNative ? _selectNative('uk') : _selectStudy('uk'),
                 ),
@@ -3123,13 +3251,14 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
                  const SizedBox(height: 32),
                  TextButton(
                     onPressed: () => setState(() => studyLang = null),
-                    child: const Text('â† Back to Study Language'),
+                    child: const Text('← Back to Study Language'),
                  )
               ]
             ],
           ),
             ),
           ),
+        ),
         ),
       ),
     );
@@ -3246,4 +3375,3 @@ class _LanguageButton extends StatelessWidget {
     );
   }
 }
-

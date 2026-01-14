@@ -97,7 +97,6 @@ A1,A1L1,service,assistance
 A1,A1L1,country,nation
 A1,A1L1,open,unlocked
 A1,A1L1,season,period
-A1,A1L1,shit,feces
 A1,A1L1,thank,appreciate
 A1,A1L1,child,kid
 A1,A1L1,general,common
@@ -146,7 +145,6 @@ A1,A1L1,pay,compensate
 A1,A1L1,problem,issue
 A1,A1L1,south,down
 A1,A1L1,true,genuine
-A1,A1L1,fuck,have sex
 A1,A1L1,history,chronicle
 A1,A1L1,large,big
 A1,A1L1,lose,misplace
@@ -184,11 +182,10 @@ A1,A1L1,late,tardy
 A1,A1L1,north,up
 A1,A1L1,special,unique
 A1,A1L1,watch,observe
-A1,A1L1,fucking,damn
 A1,A1L1,future,subsequent
 A1,A1L1,light,brightness
 A1,A1L1,low,small
-A1,A1L1,million,million
+A1,A1L1,million,
 A1,A1L1,morning,dawn
 A1,A1L1,police,law enforcement
 A1,A1L1,short,brief
@@ -272,11 +269,9 @@ A1,A1L2,term,period
 A1,A1L2,wife,spouse
 A1,A1L2,beautiful,pretty
 A1,A1L2,date,day
-A1,A1L2,kill,murder
 A1,A1L2,land,ground
 A1,A1L2,miss,overlook
 A1,A1L2,project,plan
-A1,A1L2,sex,gender
 A1,A1L2,shoot,fire
 A1,A1L2,site,location
 A1,A1L2,strong,powerful
@@ -443,7 +438,7 @@ A1,A1L3,increase,boost
 A1,A1L3,legal,lawful
 A1,A1L3,pick,choose
 A1,A1L3,race,competition
-A1,A1L3,seven,seven
+A1,A1L3,seven,
 A1,A1L3,sign,indicate
 A1,A1L3,simple,easy
 A2,A2L1,simply,merely
@@ -541,7 +536,7 @@ A2,A2L1,expect,anticipate
 A2,A2L1,gas,fuel
 A2,A2L1,island,isle
 A2,A2L1,normal,standard
-A2,A2L1,population,population
+A2,A2L1,population,
 A2,A2L1,potential,possible
 A2,A2L1,pressure,stress
 A2,A2L1,station,stop
@@ -784,7 +779,6 @@ A2,A2L2,interview,discussion
 A2,A2L2,library,collection
 A2,A2L2,locate,find
 A2,A2L2,location,site
-A2,A2L2,murder,killing
 A2,A2L2,star,celebrity
 A2,A2L2,accept,receive
 A2,A2L2,actual,real
@@ -957,7 +951,6 @@ A2,A2L3,alive,living
 A2,A2L3,apple,fruit
 A2,A2L3,balance,equilibrium
 A2,A2L3,birthday,anniversary
-A2,A2L3,bitch,complaint
 A2,A2L3,boss,manager
 A2,A2L3,connection,link
 A2,A2L3,dress,attire
@@ -1099,7 +1092,6 @@ A2,A2L4,border,boundary
 A2,A2L4,command,order
 A2,A2L4,crew,team
 A2,A2L4,crowd,gathering
-A2,A2L4,dick,penis
 A2,A2L4,element,component
 A2,A2L4,enemy,foe
 A2,A2L4,ensure,guarantee
@@ -1305,7 +1297,6 @@ A2,A2L5,opposite,reverse
 A2,A2L5,selection,choice
 A2,A2L5,signal,sign
 A2,A2L5,struggle,fight
-A2,A2L5,suicide,self-harm
 A2,A2L5,theme,topic
 A2,A2L5,tiny,small
 A2,A2L5,typically,usually
@@ -1369,7 +1360,6 @@ A2,A2L5,danger,risk
 A2,A2L5,delivery,shipment
 A2,A2L5,deserve,merit
 A2,A2L5,folk,people
-A2,A2L5,gender,sex
 A2,A2L5,instance,example
 A2,A2L5,kinda,sorta
 A2,A2L5,motion,movement
@@ -1607,7 +1597,7 @@ B1,B1L1,seemingly,apparently
 B1,B1L1,senator,legislator
 B1,B1L1,severely,harshly
 B1,B1L1,shocking,alarming
-B1,B1L1,survivor,survivor
+B1,B1L1,survivor,
 B1,B1L1,technically,mechanically
 B1,B1L1,unlimited,boundless
 B1,B1L1,anxious,worried
@@ -1996,7 +1986,7 @@ B1,B1L3,bet,wager
 B1,B1L3,borrow,loan
 B1,B1L3,camping,outdoor
 B1,B1L3,capitol,building
-B1,B1L3,celtic,Celtic
+B1,B1L3,celtic,
 B1,B1L3,civic,municipal
 B1,B1L3,considerably,significantly
 B1,B1L3,cottage,house
@@ -2098,7 +2088,6 @@ B1,B1L4,bump,knock
 B1,B1L4,button,fastener
 B1,B1L4,cart,trolley
 B1,B1L4,circus,show
-B1,B1L4,cocaine,drug
 B1,B1L4,compelling,convincing
 B1,B1L4,compile,assemble
 B1,B1L4,complication,difficulty
@@ -2843,7 +2832,6 @@ B1,B1L7,harm,damage
 B1,B1L7,household,family
 B1,B1L7,immigration,migration
 B1,B1L7,impressive,remarkable
-B1,B1L7,killer,murderer
 B1,B1L7,lesson,class
 B1,B1L7,membership,subscription
 B1,B1L7,mirror,reflector
@@ -3484,7 +3472,6 @@ B1,B1L11,stunning,astonishing
 B1,B1L11,tune,melody
 B1,B1L11,utility,usefulness
 B1,B1L11,vessel,container
-B1,B1L11,weed,plant
 B1,B1L11,acquisition,purchase
 B1,B1L11,bold,brave
 B1,B1L11,classical,traditional
@@ -3852,7 +3839,7 @@ B1,B1L12,significance,importance
 B1,B1L12,soap,cleanser
 B1,B1L12,structural,framework
 B1,B1L12,tropical,warm
-B1,B1L12,ukrainian,Ukrainian
+B1,B1L12,ukrainian,
 B1,B1L12,unnecessary,optional
 B1,B1L12,verse,stanza
 B1,B1L12,vintage,classic
@@ -3898,7 +3885,7 @@ B1,B1L13,underlie,support
 B1,B1L13,unfair,biased
 B1,B1L13,acceptance,approval
 B1,B1L13,annually,yearly
-B1,B1L13,apologize,apologize
+B1,B1L13,apologize,
 B1,B1L13,ash,residue
 B1,B1L13,aunt,relative
 B1,B1L13,bubble,spherical
@@ -4198,7 +4185,7 @@ B2,B2L1,anthropology,human science
 B2,B2L1,antibiotic,medication
 B2,B2L1,antibody,protein
 B2,B2L1,anticipation,expectation
-B2,B2L1,antique,antique
+B2,B2L1,antique,
 B2,B2L1,antiquity,ancientness
 B2,B2L1,apartheid,segregation
 B2,B2L1,ape,monkey
@@ -4241,8 +4228,6 @@ B2,B2L1,ashore,land
 B2,B2L1,asphalt,tar
 B2,B2L1,aspiration,desire
 B2,B2L1,aspire,long
-B2,B2L1,assassin,murderer
-B2,B2L1,assassination,murder
 B2,B2L1,assembly,gathering
 B2,B2L1,assert,declare
 B2,B2L1,assertion,statement
@@ -4323,7 +4308,6 @@ B2,B2L2,barley,grain
 B2,B2L2,baron,noble
 B2,B2L2,bartender,server
 B2,B2L2,bash,party
-B2,B2L2,bastard,scoundrel
 B2,B2L2,bathe,wash
 B2,B2L2,battalion,regiment
 B2,B2L2,batter,mixer
@@ -4453,7 +4437,7 @@ B2,B2L2,burglary,theft
 B2,B2L2,bust,break
 B2,B2L2,buzz,hum
 B2,B2L2,cabinet,closet
-B2,B2L2,cafeteria,cafeteria
+B2,B2L2,cafeteria,
 B2,B2L2,caffeine,stimulant
 B2,B2L2,calcium,mineral
 B2,B2L2,calculation,computation
@@ -4520,7 +4504,7 @@ B2,B2L3,checkout,payment
 B2,B2L3,cheeky,impudent
 B2,B2L3,cheerful,happy
 B2,B2L3,cheesy,tacky
-B2,B2L3,chemist,chemist
+B2,B2L3,chemist,
 B2,B2L3,chemotherapy,treatment
 B2,B2L3,cheque,check
 B2,B2L3,cherish,treasure
@@ -5037,7 +5021,6 @@ B2,B2L5,economical,thrifty
 B2,B2L5,economically,financially
 B2,B2L5,economist,financial expert
 B2,B2L5,ecosystem,environment
-B2,B2L5,ecstasy,happiness
 B2,B2L5,edible,eatable
 B2,B2L5,edition,version
 B2,B2L5,educator,teacher
@@ -5295,7 +5278,6 @@ B2,B2L7,fragment,piece
 B2,B2L7,fraternity,brotherhood
 B2,B2L7,fraudulent,deceptive
 B2,B2L7,freelance,independent
-B2,B2L7,freestyle,unrestricted
 B2,B2L7,freeway,highway
 B2,B2L7,frenzy,craze
 B2,B2L7,freshly,recently
@@ -5489,7 +5471,6 @@ B2,B2L8,homelessness,destitution
 B2,B2L8,homemade,handcrafted
 B2,B2L8,homeowner,property owner
 B2,B2L8,homepage,website
-B2,B2L8,homicide,murder
 B2,B2L8,homophobic,anti-gay
 B2,B2L8,homosexuality,sexuality
 B2,B2L8,honeymoon,vacation
@@ -5615,7 +5596,7 @@ B2,B2L8,inhibitor,blocker
 B2,B2L8,initiation,beginning
 B2,B2L8,inject,insert
 B2,B2L8,injunction,order
-B2,B2L8,injustice,injustice
+B2,B2L8,injustice,
 B2,B2L8,inlet,entrance
 B2,B2L8,inmate,prisoner
 B2,B2L8,innate,natural
@@ -5626,7 +5607,7 @@ B2,B2L8,insecure,unsafe
 B2,B2L8,insecurity,uncertainty
 B2,B2L8,insensitive,unfeeling
 B2,B2L8,insert,add
-B2,B2L8,insider,insider
+B2,B2L8,insider,
 B2,B2L8,insignificant,trivial
 B2,B2L8,insistence,demand
 B2,B2L8,inspect,examine
@@ -5964,7 +5945,6 @@ B2,B2L10,multiplayer,cooperative
 B2,B2L10,multitude,crowd
 B2,B2L10,mundane,ordinary
 B2,B2L10,municipality,locality
-B2,B2L10,murderer,killer
 B2,B2L10,muscular,strong
 B2,B2L10,museum,gallery
 B2,B2L10,mushroom,fungus
@@ -6101,7 +6081,6 @@ B2,B2L11,ordinance,law
 B2,B2L11,organism,being
 B2,B2L11,organizational,structural
 B2,B2L11,organizer,arranger
-B2,B2L11,orgasm,climax
 B2,B2L11,oriental,eastern
 B2,B2L11,originate,begin
 B2,B2L11,orphan,waif
@@ -6285,7 +6264,6 @@ B2,B2L12,popcorn,snack
 B2,B2L12,populate,inhabit
 B2,B2L12,porcelain,ceramic
 B2,B2L12,porch,veranda
-B2,B2L12,pornography,adult
 B2,B2L12,portray,depict
 B2,B2L12,portrayal,representation
 B2,B2L12,positively,definitely
@@ -6380,8 +6358,6 @@ B2,B2L12,prospective,potential
 B2,B2L12,prosper,thrive
 B2,B2L12,prosperous,wealthy
 B2,B2L12,prostate,gland
-B2,B2L12,prostitute,sex worker
-B2,B2L12,prostitution,sex work
 B2,B2L12,protagonist,main character
 B2,B2L12,protector,guardian
 B2,B2L12,protestant,reformer
@@ -6446,7 +6422,6 @@ B2,B2L12,ramp,incline
 B2,B2L12,rampant,widespread
 B2,B2L12,ransom,payment
 B2,B2L12,rant,diatribe
-B2,B2L12,rapist,assailant
 B2,B2L12,raptor,bird
 B2,B2L12,rash,eruption
 B2,B2L12,raspberry,berry
@@ -6528,7 +6503,7 @@ B2,B2L13,remnant,remainder
 B2,B2L13,remorse,regret
 B2,B2L13,remotely,distantly
 B2,B2L13,renaissance,revival
-B2,B2L13,rename,rename
+B2,B2L13,rename,
 B2,B2L13,render,provide
 B2,B2L13,rendition,version
 B2,B2L13,renewal,revival
@@ -6765,7 +6740,6 @@ B2,B2L14,skeptical,doubtful
 B2,B2L14,skirt,dress
 B2,B2L14,skyline,horizon
 B2,B2L14,slack,loose
-B2,B2L14,slain,killed
 B2,B2L14,slam,strike
 B2,B2L14,slash,cut
 B2,B2L14,slate,board
@@ -6829,7 +6803,7 @@ B2,B2L14,spinal,vertebral
 B2,B2L14,spiral,twist
 B2,B2L14,spirituality,religiosity
 B2,B2L14,spit,expectorate
-B2,B2L14,splash,splash
+B2,B2L14,splash,
 B2,B2L14,splendid,magnificent
 B2,B2L14,spoil,ruin
 B2,B2L14,spoiler,leak
@@ -7331,7 +7305,6 @@ B2,B2L17,whisper,murmur
 B2,B2L17,whistle,blow
 B2,B2L17,wholesome,healthy
 B2,B2L17,wholly,entirely
-B2,B2L17,whore,prostitute
 B2,B2L17,wicket,gate
 B2,B2L17,widen,expand
 B2,B2L17,wig,hairpiece
@@ -7741,7 +7714,7 @@ C1,C1L2,earner,income
 C1,C1L2,fanatic,zealot
 C1,C1L2,fragmentation,splitting
 C1,C1L2,gracefully,elegantly
-C1,C1L2,implicitly,implicitly
+C1,C1L2,implicitly,
 C1,C1L2,ingenuity,inventiveness
 C1,C1L2,inorganic,nonliving
 C1,C1L2,intestine,gut
@@ -8079,7 +8052,7 @@ C1,C1L4,headlight,lamp
 C1,C1L4,hectic,frantic
 C1,C1L4,holistic,comprehensive
 C1,C1L4,hormonal,endocrine
-C1,C1L4,informant,informant
+C1,C1L4,informant,
 C1,C1L4,intrusive,invasive
 C1,C1L4,invoke,call
 C1,C1L4,leaflet,brochure
@@ -8297,7 +8270,6 @@ C1,C1L5,reliably,dependably
 C1,C1L5,semantic,meaningful
 C1,C1L5,validate,confirm
 C1,C1L5,anonymity,namelessness
-C1,C1L5,assassinate,murder
 C1,C1L5,banish,exile
 C1,C1L5,bestow,give
 C1,C1L5,brilliance,brightness
@@ -8412,7 +8384,7 @@ C2,C2L1,martyrdom,sacrifice
 C2,C2L1,motherboard,circuit board
 C2,C2L1,moye,mow
 C2,C2L1,mutilate,mangle
-C2,C2L1,nigerian,Nigerian
+C2,C2L1,nigerian,
 C2,C2L1,nuance,subtlety
 C2,C2L1,orchard,grove
 C2,C2L1,ovary,gonad
@@ -8457,7 +8429,7 @@ C2,C2L1,vigilance,watchfulness
 C2,C2L1,viscount,noble
 C2,C2L1,walkway,path
 C2,C2L1,westerner,occidental
-C2,C2L1,whistler,whistler
+C2,C2L1,whistler,
 C2,C2L1,windmill,mill
 C2,C2L1,workflow,process
 C2,C2L1,wrapper,cover
@@ -8594,7 +8566,7 @@ C2,C2L1,accrue,accumulate
 C2,C2L1,actin,protein
 C2,C2L1,adhesion,bonding
 C2,C2L1,ande,walk
-C2,C2L1,armenian,Armenian
+C2,C2L1,armenian,
 C2,C2L1,atrocious,horrible
 C2,C2L1,autobiographical,self-referential
 C2,C2L1,avian,bird
@@ -8896,7 +8868,7 @@ C2,C2L3,painkiller,analgesic
 C2,C2L3,pallet,platform
 C2,C2L3,patriarchy,male dominance
 C2,C2L3,pedagogy,teaching
-C2,C2L3,perm,perm
+C2,C2L3,perm,
 C2,C2L3,philanthropist,benefactor
 C2,C2L3,predictor,forecaster
 C2,C2L3,readership,audience
@@ -8975,7 +8947,7 @@ C2,C2L3,gully,ravine
 C2,C2L3,gurney,stretcher
 C2,C2L3,hiker,walker
 C2,C2L3,humankind,mankind
-C2,C2L3,immunology,immunology
+C2,C2L3,immunology,
 C2,C2L3,ingest,consume
 C2,C2L3,intensifie,amplify
 C2,C2L3,kiln,oven
@@ -9219,7 +9191,6 @@ C2,C2L5,embellish,decorate
 C2,C2L5,emphatic,strong
 C2,C2L5,enrolment,registration
 C2,C2L5,exclamation,interjection
-C2,C2L5,executioner,killer
 C2,C2L5,exert,apply
 C2,C2L5,expressway,highway
 C2,C2L5,fairer,more just
@@ -9321,7 +9292,7 @@ C2,C2L5,bitchy,mean
 C2,C2L5,bleep,signal
 C2,C2L5,blueberry,berry
 C2,C2L5,braid,plait
-C2,C2L5,brazilian,Brazilian
+C2,C2L5,brazilian,
 C2,C2L5,cavern,cave
 C2,C2L5,chivalry,knighthood
 C2,C2L5,civilised,cultured
@@ -9329,7 +9300,7 @@ C2,C2L5,cocoon,wrapper
 C2,C2L5,comms,communications
 C2,C2L5,cornerback,defender
 C2,C2L5,credence,belief
-C2,C2L5,crossfire,crossfire
+C2,C2L5,crossfire,
 C2,C2L5,debtor,borrower
 C2,C2L5,disallow,prohibit
 C2,C2L5,draught,draft
@@ -9810,14 +9781,14 @@ C2,C2L8,forgave,pardon
 C2,C2L8,fussy,particular
 C2,C2L8,garnish,decorate
 C2,C2L8,genealogical,family
-C2,C2L8,gough,gough
+C2,C2L8,gough,
 C2,C2L8,graciously,kindly
-C2,C2L8,hampstead,hampstead
+C2,C2L8,hampstead,
 C2,C2L8,headway,progress
 C2,C2L8,hearsay,rumor
 C2,C2L8,hideout,sanctuary
-C2,C2L8,hoa,hoa
-C2,C2L8,hobbe,hobbe
+C2,C2L8,hoa,
+C2,C2L8,hobbe,
 C2,C2L8,hutch,cage
 C2,C2L8,idyllic, picturesque
 C2,C2L8,impossibility,infeasibility
@@ -9829,8 +9800,8 @@ C2,C2L8,instinctive,intuitive
 C2,C2L8,interpretive,descriptive
 C2,C2L8,intrepid,fearless
 C2,C2L8,intuitively,instinctively
-C2,C2L8,kew,kew
-C2,C2L8,lannister,lannister
+C2,C2L8,kew,
+C2,C2L8,lannister,
 C2,C2L8,milder,softer
 C2,C2L8,millimeter,millimetre
 C2,C2L8,misfit,outcast
@@ -9887,7 +9858,7 @@ C2,C2L8,unpack,unwrap
 C2,C2L8,urbanization,development
 C2,C2L8,victimize,persecute
 C2,C2L8,westbound,westward
-C2,C2L8,westerly,westerly
+C2,C2L8,westerly,
 C2,C2L8,whitehouse,residence
 C2,C2L8,wilfre,none
 C2,C2L8,winch,hoist
@@ -10006,7 +9977,7 @@ C2,C2L8,priory,monastery
 C2,C2L9,programmable,configurable
 C2,C2L9,quintessential,typical
 C2,C2L9,radiate,emit
-C2,C2L9,redd,redd
+C2,C2L9,redd,
 C2,C2L9,regularity,consistency
 C2,C2L9,remediation,correction
 C2,C2L9,resound,echo
@@ -10484,7 +10455,7 @@ C2,C2L11,frontage,facade
 C2,C2L11,fryer,cooker
 C2,C2L11,goof,mistake
 C2,C2L11,hoon,rascal
-C2,C2L11,hoot,hoot
+C2,C2L11,hoot,
 C2,C2L11,hose,pipe
 C2,C2L11,humanism,philosophy
 C2,C2L11,incarnate,embodied

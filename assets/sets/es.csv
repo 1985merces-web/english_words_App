@@ -97,7 +97,6 @@ A1,A1L1,servicio,
 A1,A1L1,país,nación
 A1,A1L1,abrir,abierto
 A1,A1L1,temporada,estación
-A1,A1L1,mierda,
 A1,A1L1,agradecer,dar gracias
 A1,A1L1,niño,infante
 A1,A1L1,general,común
@@ -146,7 +145,6 @@ A1,A1L1,pagar,
 A1,A1L1,problema,
 A1,A1L1,sur,
 A1,A1L1,verdadero,
-A1,A1L1,follar,coito
 A1,A1L1,historia,
 A1,A1L1,grande,
 A1,A1L1,perder,
@@ -184,7 +182,6 @@ A1,A1L1,tarde,demorado
 A1,A1L1,norte,
 A1,A1L1,especial,particular
 A1,A1L1,ver,mirar
-A1,A1L1,maldito,jodido
 A1,A1L1,futuro,venidero
 A1,A1L1,luz,
 A1,A1L1,bajo,poco
@@ -272,11 +269,9 @@ A1,A1L2,término,plazo
 A1,A1L2,esposa,mujer
 A1,A1L2,hermoso,bellamente
 A1,A1L2,fecha,cita
-A1,A1L2,matar,asesinar
 A1,A1L2,tierra,terreno
 A1,A1L2,extrañar,perder
 A1,A1L2,proyecto,
-A1,A1L2,sexo,género
 A1,A1L2,disparar,
 A1,A1L2,sitio,lugar
 A1,A1L2,fuerte,robusto
@@ -784,7 +779,6 @@ A2,A2L2,entrevista,
 A2,A2L2,biblioteca,
 A2,A2L2,localizar,
 A2,A2L2,ubicación,lugar
-A2,A2L2,asesinato,homicidio
 A2,A2L2,estrella,
 A2,A2L2,aceptar,
 A2,A2L2,real,efectivo
@@ -957,7 +951,6 @@ A2,A2L3,vivo,
 A2,A2L3,manzana,
 A2,A2L3,equilibrio,
 A2,A2L3,cumpleaños,
-A2,A2L3,perra,
 A2,A2L3,jefe,
 A2,A2L3,conexión,vínculo
 A2,A2L3,vestido,ropa
@@ -1099,7 +1092,6 @@ A2,A2L4,frontera,borde
 A2,A2L4,comando,orden
 A2,A2L4,tripulación,equipo
 A2,A2L4,multitud,grupo
-A2,A2L4,pene,
 A2,A2L4,elemento,componente
 A2,A2L4,enemigo,oponente
 A2,A2L4,asegurar,garantizar
@@ -1305,7 +1297,6 @@ A2,A2L5,opuesto,contrario
 A2,A2L5,selección,
 A2,A2L5,señal,
 A2,A2L5,lucha,
-A2,A2L5,suicidio,
 A2,A2L5,tema,
 A2,A2L5,pequeño,minúsculo
 A2,A2L5,típicamente,
@@ -1369,7 +1360,6 @@ A2,A2L5,peligro,
 A2,A2L5,entrega,envío
 A2,A2L5,merecer,
 A2,A2L5,gente,folclore
-A2,A2L5,género,
 A2,A2L5,instancia,ejemplo
 A2,A2L5,más o menos,tipo
 A2,A2L5,movimiento,
@@ -2098,7 +2088,6 @@ B1,B1L4,golpe,
 B1,B1L4,botón,
 B1,B1L4,carrito,
 B1,B1L4,circo,
-B1,B1L4,cocaína,
 B1,B1L4,convincente,
 B1,B1L4,compilar,
 B1,B1L4,complicación,
@@ -2843,7 +2832,6 @@ B1,B1L7,daño,perjuicio
 B1,B1L7,hogar,familia
 B1,B1L7,inmigración,
 B1,B1L7,impresionante,
-B1,B1L7,asesino,matador
 B1,B1L7,lección,clase
 B1,B1L7,membresía,
 B1,B1L7,espejo,
@@ -3484,7 +3472,6 @@ B1,B1L11,impresionante,asombroso
 B1,B1L11,melodía,sintonía
 B1,B1L11,utilidad,servicio
 B1,B1L11,vaso,buque
-B1,B1L11,hierba,mala hierba
 B1,B1L11,adquisición,compra
 B1,B1L11,audaz,valiente
 B1,B1L11,clásico,clásica
@@ -4241,8 +4228,6 @@ B2,B2L1,en la costa,
 B2,B2L1,asfalto,
 B2,B2L1,aspiración,
 B2,B2L1,aspirar,
-B2,B2L1,asesino,
-B2,B2L1,asesinato,
 B2,B2L1,asamblea,congreso
 B2,B2L1,afirmar,asegurar
 B2,B2L1,afirmación,
@@ -4323,7 +4308,6 @@ B2,B2L2,cebada,
 B2,B2L2,barón,
 B2,B2L2,bartender,cantinero
 B2,B2L2,fiesta,
-B2,B2L2,bastardo,
 B2,B2L2,bañar,
 B2,B2L2,batallón,
 B2,B2L2,masa,bater
@@ -5037,7 +5021,6 @@ B2,B2L5,económico,
 B2,B2L5,económicamente,
 B2,B2L5,economista,
 B2,B2L5,ecosistema,
-B2,B2L5,éxtasis,
 B2,B2L5,comestible,
 B2,B2L5,edición,
 B2,B2L5,educador,
@@ -5295,7 +5278,6 @@ B2,B2L7,fragmento,
 B2,B2L7,fraternidad,
 B2,B2L7,fraudulento,
 B2,B2L7,freelance,autónomo
-B2,B2L7,estilo libre,
 B2,B2L7,autopista,
 B2,B2L7,frenesí,
 B2,B2L7,recientemente,
@@ -5489,7 +5471,6 @@ B2,B2L8,indigencia,
 B2,B2L8,hecho en casa,
 B2,B2L8,propietario,
 B2,B2L8,página principal,
-B2,B2L8,homicidio,
 B2,B2L8,homofóbico,
 B2,B2L8,homosexualidad,
 B2,B2L8,luna de miel,
@@ -5964,7 +5945,6 @@ B2,B2L10,multijugador,
 B2,B2L10,multitud,
 B2,B2L10,mundano,
 B2,B2L10,municipio,
-B2,B2L10,asesino,
 B2,B2L10,muscular,musculoso
 B2,B2L10,museo,
 B2,B2L10,hongo,seta
@@ -6101,7 +6081,6 @@ B2,B2L11,ordenanza,
 B2,B2L11,organismo,
 B2,B2L11,organizacional,
 B2,B2L11,organizador,
-B2,B2L11,orgasmo,
 B2,B2L11,oriental,
 B2,B2L11,originar,
 B2,B2L11,huérfano,
@@ -6285,7 +6264,6 @@ B2,B2L12,palomitas,poporopos
 B2,B2L12,poblar,
 B2,B2L12,porcelana,
 B2,B2L12,porche,terraza
-B2,B2L12,pornografía,
 B2,B2L12,representar,retratar
 B2,B2L12,representación,retrato
 B2,B2L12,positivamente,afirmativamente
@@ -6380,8 +6358,6 @@ B2,B2L12,prospectivo,
 B2,B2L12,prosperar,
 B2,B2L12,próspero,
 B2,B2L12,próstata,
-B2,B2L12,prostituta,
-B2,B2L12,prostitución,
 B2,B2L12,protagonista,
 B2,B2L12,protector,
 B2,B2L12,protestante,
@@ -6446,7 +6422,6 @@ B2,B2L12,rampa,
 B2,B2L12,desenfrenado,
 B2,B2L12,rescate,
 B2,B2L12,discurso,monólogo
-B2,B2L12,violador,
 B2,B2L12,rapaz,
 B2,B2L12,erupción,sarpullido
 B2,B2L12,frambuesa,
@@ -6765,7 +6740,6 @@ B2,B2L14,escéptico,
 B2,B2L14,falda,
 B2,B2L14,línea del horizonte,
 B2,B2L14,flojo,relajado
-B2,B2L14,asesinado,
 B2,B2L14,golpe,
 B2,B2L14,corte,
 B2,B2L14,pizarra,
@@ -7331,7 +7305,6 @@ B2,B2L17,susurro,murmurar
 B2,B2L17,silbido,silbar
 B2,B2L17,saludable,nutritivo
 B2,B2L17,totalmente,completamente
-B2,B2L17,prostituta,meretriz
 B2,B2L17,puerta,portillo
 B2,B2L17,ampliar,ensanchar
 B2,B2L17,peluca,
@@ -8297,7 +8270,6 @@ C1,C1L5,fiablemente,confiablemente
 C1,C1L5,semántico,
 C1,C1L5,validar,verificar
 C1,C1L5,anonimato,anónimo
-C1,C1L5,asesinar,eliminar
 C1,C1L5,desterrar,expulsar
 C1,C1L5,otorgar,conceder
 C1,C1L5,brillantez,genialidad
@@ -9219,7 +9191,6 @@ C2,C2L5,embellecer,
 C2,C2L5,enfático,
 C2,C2L5,matrícula,
 C2,C2L5,exclamación,
-C2,C2L5,verdugo,
 C2,C2L5,ejercer,
 C2,C2L5,autopista,
 C2,C2L5,más justo,
