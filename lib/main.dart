@@ -1,8 +1,17 @@
-﻿import 'package:flutter/material.dart';
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 // import 'home_page.dart'; // <-- import your splash page
 import 'package:flutter_svg/flutter_svg.dart';
-import 'package:flutter/services.dart' show rootBundle, SystemUiOverlayStyle;
-import 'dart:typed_data';
+import 'package:flutter/services.dart'
+    show
+        rootBundle,
+        SystemUiOverlayStyle,
+        FilteringTextInputFormatter,
+        SystemNavigator,
+        SystemSound,
+        SystemSoundType,
+        HapticFeedback;
 import 'dart:ui' show ImageFilter;
 import 'package:csv/csv.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -142,7 +151,14 @@ class _FlashcardScreenState extends State<FlashcardScreen>
   bool randomSpeaking = true;
   bool allowBackgroundSpeaking = false;
   bool darkTheme = false;
+  bool tapSounds = true;
+  bool sleepTimerLoop = true;
   String targetCustomSet = ''; // <-- Add this
+  Timer? sleepTimer;
+  Timer? sleepTicker;
+  DateTime? sleepTimerEnd;
+  final TextEditingController sleepTimerController = TextEditingController();
+  String activeSettingsPanel = '';
 
   // Add this to track loading state
   bool isLoading = true;
@@ -151,6 +167,17 @@ class _FlashcardScreenState extends State<FlashcardScreen>
   Map<String, String> enUkDictionary = {};
   List<String> allCustomListNames = [];
   List<WordEntry> _customEntries = []; // Cache for starred and custom words
+
+  void _playTapClick() {
+    // Best-effort: not all devices/platforms will play a click sound.
+    if (!tapSounds) return;
+    try {
+      unawaited(SystemSound.play(SystemSoundType.click));
+    } catch (_) {}
+    try {
+      unawaited(HapticFeedback.selectionClick());
+    } catch (_) {}
+  }
 
   @override
   void initState() {
@@ -179,6 +206,9 @@ class _FlashcardScreenState extends State<FlashcardScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     stopPlaying(updateUi: false);
+    sleepTimer?.cancel();
+    sleepTicker?.cancel();
+    sleepTimerController.dispose();
     super.dispose();
   }
 
@@ -190,6 +220,8 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       targetCustomSet = prefs.getString('targetCustomSet') ?? '';
       allowBackgroundSpeaking =
           prefs.getBool('allowBackgroundSpeaking') ?? false;
+      tapSounds = prefs.getBool('tapSounds') ?? true;
+      sleepTimerLoop = prefs.getBool('sleepTimerLoop') ?? true;
     });
   }
 
@@ -204,6 +236,47 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     await prefs.setString('targetCustomSet', listName);
     setState(() {
       targetCustomSet = listName;
+    });
+  }
+
+  void _cancelSleepTimer() {
+    sleepTimer?.cancel();
+    sleepTicker?.cancel();
+    sleepTimer = null;
+    sleepTicker = null;
+    sleepTimerEnd = null;
+  }
+
+  String _remainingSleepMinutesLabel() {
+    if (sleepTimerEnd == null) return 'off';
+    final remaining = sleepTimerEnd!.difference(DateTime.now());
+    if (remaining.isNegative) return 'off';
+    final totalSeconds = remaining.inSeconds;
+    final hours = totalSeconds ~/ 3600;
+    final minutes = (totalSeconds % 3600) ~/ 60;
+    final seconds = totalSeconds % 60;
+    if (hours > 0) {
+      return '$hours:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+    }
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  void _startSleepTimer(Duration duration) {
+    _cancelSleepTimer();
+    sleepTimerEnd = DateTime.now().add(duration);
+    sleepTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() {});
+    });
+    sleepTimer = Timer(duration, () {
+      if (!mounted) return;
+      stopPlaying();
+      setState(() {
+        _cancelSleepTimer();
+      });
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+        SystemNavigator.pop();
+      }
     });
   }
 
@@ -467,10 +540,18 @@ class _FlashcardScreenState extends State<FlashcardScreen>
         await Future.delayed(const Duration(milliseconds: 700));
       }
     } else {
-      for (int i = startIdx; i < currentSetWords.length; i++) {
-        if (!isPlaying) break;
-        final entry = currentSetWords[i];
+      int i = startIdx;
+      while (isPlaying) {
+        if (currentSetWords.isEmpty) break;
+        if (i >= currentSetWords.length) {
+          if (sleepTimerEnd != null && sleepTimerLoop) {
+            i = 0;
+          } else {
+            break;
+          }
+        }
 
+        final entry = currentSetWords[i];
         if (!mounted) break;
         setState(() {
           currentIndex = i;
@@ -483,6 +564,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
         await speakEntry(entry, studyFirst: speakStudyFirst);
         if (!isPlaying) break;
         await Future.delayed(const Duration(seconds: 1));
+        i++;
       }
     }
 
@@ -627,6 +709,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
         children: [
           GestureDetector(
             onTap: () {
+              _playTapClick();
               toggleCardFace();
             },
             onHorizontalDragEnd: (details) {
@@ -674,6 +757,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                       left: 12,
                       child: GestureDetector(
                         onTap: () {
+                          _playTapClick();
                           if (currentSetWords.isNotEmpty) {
                             // Check if we're in a custom list
                             if (selectedLevel == 'custom') {
@@ -823,6 +907,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       bool isEN = gridCardENFace[idx];
       return GestureDetector(
         onTap: () {
+          _playTapClick();
           setState(() {
             gridCardENFace[idx] = !gridCardENFace[idx];
           });
@@ -841,6 +926,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                 left: 8,
                 child: GestureDetector(
                   onTap: () {
+                    _playTapClick();
                     // Check if we're in a custom list
                     if (selectedLevel == 'custom') {
                       _removeWordFromCustomList(entry);
@@ -911,6 +997,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                 right: 8,
                 child: GestureDetector(
                   onTap: () {
+                    _playTapClick();
                     speakWord(entry.wordMain);
                   },
                   child: SvgPicture.asset(
@@ -932,7 +1019,10 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       double? width,
     }) {
       return GestureDetector(
-        onTap: onTap,
+        onTap: () {
+          _playTapClick();
+          onTap();
+        },
         behavior: HitTestBehavior.opaque,
         child: SizedBox(
           width: width,
@@ -950,18 +1040,8 @@ class _FlashcardScreenState extends State<FlashcardScreen>
             math.max(12.0, math.min(32.0, maxWidth * 0.04));
         final double availableWidth =
             math.max(140.0, maxWidth - horizontalPadding * 2);
-        int computedColumns = (availableWidth / 150).floor();
-        if (computedColumns < 2) {
-          computedColumns = 2;
-        } else if (computedColumns > 4) {
-          computedColumns = 4;
-        }
-        final int crossAxisCount = computedColumns;
         final double spacing =
             math.max(10.0, math.min(20.0, availableWidth * 0.03));
-        final double usableWidth =
-            availableWidth - spacing * (crossAxisCount - 1);
-        final double cardWidth = usableWidth / crossAxisCount;
         final int startIndex = gridPage * _cardsPerGridPage;
         final int totalRemaining =
             math.max(0, currentSetWords.length - startIndex);
@@ -971,15 +1051,35 @@ class _FlashcardScreenState extends State<FlashcardScreen>
         final double viewportHeight = availableHeight;
         final double gridTopPadding = 0.0;
         final double gridBottomPadding = 0.0;
+        final bool isLandscape = maxWidth >= viewportHeight;
+        final bool isTabletLayout =
+            math.min(maxWidth, viewportHeight) >= 600.0;
+        final bool forceTabletGrid =
+            isTabletLayout && itemsOnPage == _cardsPerGridPage;
+        int computedColumns = (availableWidth / 150).floor();
+        if (computedColumns < 2) {
+          computedColumns = 2;
+        } else if (computedColumns > 4) {
+          computedColumns = 4;
+        }
+        final int crossAxisCount =
+            forceTabletGrid ? (isLandscape ? 5 : 2) : computedColumns;
+        final double usableWidth =
+            availableWidth - spacing * (crossAxisCount - 1);
+        final double cardWidth = usableWidth / crossAxisCount;
         final int rows = itemsOnPage == 0
             ? 1
-            : ((itemsOnPage + crossAxisCount - 1) ~/ crossAxisCount);
+            : forceTabletGrid
+                ? (isLandscape ? 2 : 5)
+                : ((itemsOnPage + crossAxisCount - 1) ~/ crossAxisCount);
         final double availableHeightForCards = math.max(
             160.0, viewportHeight - gridTopPadding - gridBottomPadding);
         final double fittedCardHeight =
             (availableHeightForCards - spacing * (rows - 1)) / rows;
-        final double cardHeight = math.max(
-            gridCardMinHeight, math.min(cardWidth * 0.78, fittedCardHeight));
+        final double cardHeight = forceTabletGrid
+            ? math.max(gridCardMinHeight, fittedCardHeight)
+            : math.max(
+                gridCardMinHeight, math.min(cardWidth * 0.78, fittedCardHeight));
         final double aspectRatio = cardWidth / cardHeight;
         final double gridContentHeight =
             rows * cardHeight + math.max(0, rows - 1) * spacing;
@@ -1166,6 +1266,339 @@ class _FlashcardScreenState extends State<FlashcardScreen>
         // --- WRAP THE CONTAINER WITH A STATEFULBUILDER ---
         child: StatefulBuilder(
           builder: (BuildContext context, StateSetter setMenuState) {
+            void togglePanel(String panel) {
+              setState(() {
+                activeSettingsPanel = activeSettingsPanel == panel ? '' : panel;
+              });
+              setMenuState(() {});
+            }
+
+            Color tileIconColor(bool enabled) {
+              if (enabled) return Colors.black;
+              return darkTheme ? Colors.white : Colors.black;
+            }
+
+            Widget settingsTile({
+              required Widget icon,
+              required String label,
+              String? subLabel,
+              required bool enabled,
+              required VoidCallback onTap,
+            }) {
+              final Color base = darkTheme ? const Color(0xFF263240) : Colors.white;
+              final Color active = const Color(0xFFD6ECFF);
+              final Color border = darkTheme
+                  ? Colors.white24
+                  : const Color(0xFF1A237E).withValues(alpha: 0.18);
+              final Color labelColor =
+                  enabled ? Colors.black : (darkTheme ? Colors.white : Colors.black87);
+              final Color subColor =
+                  enabled ? Colors.black54 : (darkTheme ? Colors.white60 : Colors.black54);
+              return GestureDetector(
+                onTap: () {
+                  _playTapClick();
+                  onTap();
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: enabled ? active : base,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: border),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.04),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      icon,
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              label,
+                              style: TextStyle(
+                                color: labelColor,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 17,
+                              ),
+                            ),
+                            if (subLabel != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 2),
+                                child: Text(
+                                  subLabel,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: subColor,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+
+            Widget settingsPanel() {
+              if (activeSettingsPanel == 'sleep') {
+                return Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: darkTheme ? const Color(0xFF1F2B3B) : Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: darkTheme
+                          ? Colors.white24
+                          : const Color(0xFF1A237E).withValues(alpha: 0.18),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Sleep timer',
+                        style: TextStyle(
+                          color: darkTheme ? Colors.white70 : Colors.black87,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 17,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              sleepTimerEnd == null
+                                  ? 'off'
+                                  : _remainingSleepMinutesLabel(),
+                              style: TextStyle(
+                                color: darkTheme ? Colors.white : Colors.black,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 70,
+                            child: TextField(
+                              controller: sleepTimerController,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.digitsOnly
+                              ],
+                              cursorColor:
+                                  darkTheme ? Colors.white : Colors.black,
+                              style: TextStyle(
+                                color:
+                                    darkTheme ? Colors.white : Colors.black87,
+                                fontSize: 17,
+                              ),
+                              decoration: InputDecoration(
+                                hintText: 'min',
+                                hintStyle: TextStyle(
+                                  color: darkTheme
+                                      ? Colors.white70
+                                      : Colors.black45,
+                                  fontSize: 14,
+                                ),
+                                filled: true,
+                                fillColor: darkTheme
+                                    ? const Color(0xFF2C3E50)
+                                    : const Color(0xFFF7F9FC),
+                                isDense: true,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 8,
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                  borderSide: BorderSide(
+                                    color: darkTheme
+                                        ? Colors.white30
+                                        : Colors.black26,
+                                  ),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                  borderSide: BorderSide(
+                                    color: darkTheme
+                                        ? Colors.white70
+                                        : Colors.black54,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton(
+                            onPressed: () {
+                              final minutes = int.tryParse(
+                                sleepTimerController.text.trim(),
+                              );
+                              if (minutes == null || minutes <= 0) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content:
+                                        Text('Enter minutes for sleep timer'),
+                                  ),
+                                );
+                                return;
+                              }
+                              setState(() {
+                                _startSleepTimer(Duration(minutes: minutes));
+                              });
+                              setMenuState(() {});
+                            },
+                            icon: Icon(
+                              Icons.play_arrow,
+                              color: darkTheme ? Colors.white : Colors.black,
+                              size: 22,
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: () {
+                              setState(() => _cancelSleepTimer());
+                              setMenuState(() {});
+                            },
+                            icon: Icon(
+                              Icons.stop,
+                              color: darkTheme ? Colors.white : Colors.black,
+                              size: 22,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              sleepTimerLoop
+                                  ? 'Repeat list'
+                                  : 'Play once in order',
+                              style: TextStyle(
+                                color: darkTheme ? Colors.white70 : Colors.black87,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          Switch.adaptive(
+                            value: sleepTimerLoop,
+                            onChanged: (value) async {
+                              _playTapClick();
+                              final prefs = await SharedPreferences.getInstance();
+                              await prefs.setBool('sleepTimerLoop', value);
+                              if (!mounted) return;
+                              setState(() => sleepTimerLoop = value);
+                              setMenuState(() {});
+                            },
+                            activeThumbColor:
+                                darkTheme ? Colors.white : Colors.black,
+                            activeTrackColor: const Color(0xFFB3E5FC),
+                            inactiveThumbColor:
+                                darkTheme ? Colors.white70 : Colors.black54,
+                            inactiveTrackColor: darkTheme
+                                ? Colors.white24
+                                : const Color(0xFF1A237E).withValues(alpha: 0.18),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              if (activeSettingsPanel == 'save') {
+                return Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: darkTheme ? const Color(0xFF1F2B3B) : Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: darkTheme
+                          ? Colors.white24
+                          : const Color(0xFF1A237E).withValues(alpha: 0.18),
+                    ),
+                  ),
+                  child: _buildSaveToSection(darkTheme, setMenuState),
+                );
+              }
+
+              if (activeSettingsPanel == 'legal') {
+                return Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: darkTheme ? const Color(0xFF1F2B3B) : Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: darkTheme
+                          ? Colors.white24
+                          : const Color(0xFF1A237E).withValues(alpha: 0.18),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Legal',
+                        style: TextStyle(
+                          color: darkTheme ? Colors.white70 : Colors.black54,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.6,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      _settingsRow(
+                        icon: Icon(
+                          Icons.privacy_tip_outlined,
+                          size: 32,
+                          color: darkTheme ? Colors.white60 : Colors.black38,
+                        ),
+                        label: 'Privacy Policy',
+                        value: false,
+                        onChanged: (_) => _openLegalUrl(_privacyPolicyUrl),
+                        darkTheme: darkTheme,
+                        isButton: true,
+                        labelColor: darkTheme ? Colors.white60 : Colors.black38,
+                        chevronColor: darkTheme ? Colors.white60 : Colors.black38,
+                      ),
+                      const SizedBox(height: 10),
+                      _settingsRow(
+                        icon: Icon(
+                          Icons.description_outlined,
+                          size: 32,
+                          color: darkTheme ? Colors.white60 : Colors.black38,
+                        ),
+                        label: 'Terms of Use',
+                        value: false,
+                        onChanged: (_) => _openLegalUrl(_termsUrl),
+                        darkTheme: darkTheme,
+                        isButton: true,
+                        labelColor: darkTheme ? Colors.white60 : Colors.black38,
+                        chevronColor: darkTheme ? Colors.white60 : Colors.black38,
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              return const SizedBox.shrink();
+            }
+
             return Container(
               width: settingsWidth,
               padding: const EdgeInsets.fromLTRB(34, 20, 34, 10),
@@ -1207,98 +1640,133 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                   ),
                   const Divider(),
                   const SizedBox(height: 12),
-                  // Play icon left of label, black color
-                  _settingsRow(
-                    icon: Icon(
-                      Icons.play_arrow,
-                      size: 32,
-                      color: darkTheme ? Colors.white : Colors.black,
-                    ),
-                    label: 'random speaking',
-                    value: randomSpeaking,
-                    onChanged: (v) => setState(() => randomSpeaking = v),
-                    darkTheme: darkTheme,
-                  ),
-                  const SizedBox(height: 18),
-                  _settingsRow(
-                    icon: Icon(
-                      Icons.lock_outline,
-                      size: 32,
-                      color: darkTheme ? Colors.white : Colors.black,
-                    ),
-                    label: 'background speaking',
-                    value: allowBackgroundSpeaking,
-                    onChanged: (v) async {
-                      final prefs = await SharedPreferences.getInstance();
-                      await prefs.setBool('allowBackgroundSpeaking', v);
-                      if (!mounted) return;
-                      setState(() => allowBackgroundSpeaking = v);
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final double tileAspect =
+                          constraints.maxWidth > 520 ? 3.0 : 2.6;
+                      return GridView.count(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        crossAxisCount: 2,
+                        crossAxisSpacing: 12,
+                        mainAxisSpacing: 12,
+                        childAspectRatio: tileAspect,
+                        children: [
+                          settingsTile(
+                            icon: Icon(
+                              Icons.play_arrow,
+                              size: 26,
+                              color: tileIconColor(randomSpeaking),
+                            ),
+                            label: 'random speaking',
+                            enabled: randomSpeaking,
+                            onTap: () {
+                              setState(() => randomSpeaking = !randomSpeaking);
+                              setMenuState(() {});
+                            },
+                          ),
+                          settingsTile(
+                            icon: Icon(
+                              Icons.lock_outline,
+                              size: 26,
+                              color: tileIconColor(allowBackgroundSpeaking),
+                            ),
+                            label: 'background speaking',
+                            enabled: allowBackgroundSpeaking,
+                            onTap: () async {
+                              final prefs = await SharedPreferences.getInstance();
+                              final v = !allowBackgroundSpeaking;
+                              await prefs.setBool('allowBackgroundSpeaking', v);
+                              if (!mounted) return;
+                              setState(() => allowBackgroundSpeaking = v);
+                              setMenuState(() {});
+                            },
+                          ),
+                          settingsTile(
+                            icon: Icon(
+                              Icons.bedtime_outlined,
+                              size: 26,
+                              color: tileIconColor(sleepTimerEnd != null ||
+                                  activeSettingsPanel == 'sleep'),
+                            ),
+                            label: 'sleep timer',
+                            subLabel: sleepTimerEnd == null
+                                ? 'off'
+                                : _remainingSleepMinutesLabel(),
+                            enabled: sleepTimerEnd != null ||
+                                activeSettingsPanel == 'sleep',
+                            onTap: () => togglePanel('sleep'),
+                          ),
+                          settingsTile(
+                            icon: SvgPicture.asset(
+                              'assets/icons/darkTheme.svg',
+                              width: 26,
+                              height: 26,
+                              colorFilter: ColorFilter.mode(
+                                tileIconColor(darkTheme),
+                                BlendMode.srcIn,
+                              ),
+                            ),
+                            label: 'dark theme',
+                            enabled: darkTheme,
+                            onTap: () {
+                              setState(() => darkTheme = !darkTheme);
+                              setMenuState(() {});
+                            },
+                          ),
+                          settingsTile(
+                            icon: Icon(
+                              Icons.volume_up_outlined,
+                              size: 26,
+                              color: tileIconColor(tapSounds),
+                            ),
+                            label: 'tap sound',
+                            enabled: tapSounds,
+                            onTap: () async {
+                              final prefs = await SharedPreferences.getInstance();
+                              final v = !tapSounds;
+                              await prefs.setBool('tapSounds', v);
+                              if (!mounted) return;
+                              setState(() => tapSounds = v);
+                              setMenuState(() {});
+                            },
+                          ),
+                          settingsTile(
+                            icon: Icon(
+                              Icons.edit_note,
+                              size: 26,
+                              color: tileIconColor(targetCustomSet.isNotEmpty ||
+                                  activeSettingsPanel == 'save'),
+                            ),
+                            label: 'save to list',
+                            subLabel: targetCustomSet.isEmpty
+                                ? 'None'
+                                : targetCustomSet,
+                            enabled: targetCustomSet.isNotEmpty ||
+                                activeSettingsPanel == 'save',
+                            onTap: () => togglePanel('save'),
+                          ),
+                          settingsTile(
+                            icon: Icon(
+                              Icons.privacy_tip_outlined,
+                              size: 26,
+                              color: tileIconColor(activeSettingsPanel == 'legal'),
+                            ),
+                            label: 'legal',
+                            subLabel: 'Privacy & Terms',
+                            enabled: activeSettingsPanel == 'legal',
+                            onTap: () => togglePanel('legal'),
+                          ),
+                        ],
+                      );
                     },
-                    darkTheme: darkTheme,
-                  ),
-                  const SizedBox(height: 18),
-                  _settingsRow(
-                    icon: SvgPicture.asset(
-                      'assets/icons/darkTheme.svg',
-                      width: 32,
-                      height: 32,
-                      colorFilter: ColorFilter.mode(
-                        darkTheme ? Colors.white : const Color(0xFF1E1E1E),
-                        BlendMode.srcIn,
-                      ),
-                    ),
-                    label: 'dark theme',
-                    value: darkTheme,
-                    onChanged: (v) => setState(() => darkTheme = v),
-                    darkTheme: darkTheme,
-                  ),
-                  const SizedBox(height: 18),
-                  const Divider(),
-                  const SizedBox(height: 10),
-                  // Pass the setMenuState function to the build method
-                  _buildSaveToSection(darkTheme, setMenuState),
-                  const SizedBox(height: 12),
-                  const Divider(),
-                  const SizedBox(height: 14),
-                  Text(
-                    'Legal',
-                    style: TextStyle(
-                      color: darkTheme ? Colors.white70 : Colors.black54,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.6,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  _settingsRow(
-                    icon: Icon(
-                      Icons.privacy_tip_outlined,
-                      size: 32,
-                      color: darkTheme ? Colors.white60 : Colors.black38,
-                    ),
-                    label: 'Privacy Policy',
-                    value: false,
-                    onChanged: (_) => _openLegalUrl(_privacyPolicyUrl),
-                    darkTheme: darkTheme,
-                    isButton: true,
-                    labelColor: darkTheme ? Colors.white60 : Colors.black38,
-                    chevronColor: darkTheme ? Colors.white60 : Colors.black38,
                   ),
                   const SizedBox(height: 12),
-                  _settingsRow(
-                    icon: Icon(
-                      Icons.description_outlined,
-                      size: 32,
-                      color: darkTheme ? Colors.white60 : Colors.black38,
-                    ),
-                    label: 'Terms of Use',
-                    value: false,
-                    onChanged: (_) => _openLegalUrl(_termsUrl),
-                    darkTheme: darkTheme,
-                    isButton: true,
-                    labelColor: darkTheme ? Colors.white60 : Colors.black38,
-                    chevronColor: darkTheme ? Colors.white60 : Colors.black38,
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 200),
+                    child: settingsPanel(),
                   ),
+                  const SizedBox(height: 10),
                   const SizedBox(height: 10),
                 ],
               ),
@@ -1393,9 +1861,9 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                   color: Color(0xFF1A237E),
                 ),
                 child: Padding(
-                  padding: EdgeInsets.fromLTRB(20, topSafePadding + 8, 20, 16),
+                  padding: EdgeInsets.fromLTRB(20, topSafePadding + 18, 20, 16),
                   child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       Expanded(
                         child: Text(
@@ -1409,6 +1877,33 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                             fontSize: 18,
                             letterSpacing: 0.3,
                           ),
+                        ),
+                      ),
+                      Expanded(
+                        child: Center(
+                          child: sleepTimerEnd == null
+                              ? const SizedBox.shrink()
+                              : Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.timer_outlined,
+                                      size: 16,
+                                      color: Colors.white,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      _remainingSleepMinutesLabel(),
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontFamily: 'Inter',
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 18,
+                                        letterSpacing: 0.3,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                         ),
                       ),
                       GestureDetector(
@@ -1481,7 +1976,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                     right: 24,
                     bottom: bottomSafePadding > 0 ? bottomSafePadding : 0),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: darkTheme ? const Color(0xFF1A237E) : Colors.white,
                   borderRadius:
                       const BorderRadius.vertical(top: Radius.circular(30)),
                   boxShadow: [
@@ -1506,6 +2001,10 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                           'assets/icons/Grid.svg',
                           width: 32,
                           height: 32,
+                          colorFilter: darkTheme
+                              ? const ColorFilter.mode(
+                                  Colors.white, BlendMode.srcIn)
+                              : null,
                         ),
                       ),
                     ),
@@ -1524,7 +2023,9 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                           height: 36,
                           alignment: Alignment.center,
                           decoration: BoxDecoration(
-                            color: const Color(0xFFF1F3F8),
+                            color: darkTheme
+                                ? const Color(0xFF263240)
+                                : const Color(0xFFF1F3F8),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Text(
@@ -1533,8 +2034,10 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                               forceStrutHeight: true,
                               height: 1.0,
                             ),
-                            style: const TextStyle(
-                              color: Color(0xFF1A237E),
+                            style: TextStyle(
+                              color: darkTheme
+                                  ? Colors.white
+                                  : const Color(0xFF1A237E),
                               fontFamily: 'Inter',
                               fontWeight: FontWeight.w700,
                               fontSize: 16,
@@ -1561,7 +2064,10 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                           colorFilter: isPlaying
                               ? const ColorFilter.mode(
                                   Colors.green, BlendMode.srcIn)
-                              : null,
+                              : (darkTheme
+                                  ? const ColorFilter.mode(
+                                      Colors.white, BlendMode.srcIn)
+                                  : null),
                         ),
                       ),
                     ),
@@ -1581,6 +2087,10 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                           'assets/icons/Chevrons right.svg',
                           width: 32,
                           height: 32,
+                          colorFilter: darkTheme
+                              ? const ColorFilter.mode(
+                                  Colors.white, BlendMode.srcIn)
+                              : null,
                         ),
                       ),
                     ),
@@ -1816,16 +2326,16 @@ class _FlashcardScreenState extends State<FlashcardScreen>
 
     final titleStyle = TextStyle(
       color: darkTheme ? Colors.white70 : Colors.black54,
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: FontWeight.w800,
     );
 
-    final studyBg = darkTheme ? const Color(0xFF223142) : const Color(0xFFB3E5FC);
-    final nativeBg = darkTheme ? const Color(0xFF223142) : const Color(0xFFB2FFB2);
+    final studyBg = const Color(0xFFB3E5FC);
+    final nativeBg = const Color(0xFFB2FFB2);
     final borderColor = darkTheme
         ? Colors.white24
         : const Color(0xFF1A237E).withValues(alpha: 0.25);
-    final textColor = darkTheme ? Colors.white : const Color(0xFF1A237E);
+    final textColor = Colors.black;
 
     Future<void> showPicker({
       required String title,
@@ -1840,6 +2350,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
           borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
         ),
         builder: (ctx) {
+          final maxHeight = MediaQuery.of(ctx).size.height * 0.75;
           return SafeArea(
             top: false,
             child: Column(
@@ -1864,36 +2375,97 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                   ),
                 ),
                 const SizedBox(height: 8),
-                for (final o in options)
-                  ListTile(
-                    enabled: o['code'] != disabledCode,
-                    leading: Text(o['flag']!, style: const TextStyle(fontSize: 22)),
-                    title: Text(
-                      o['label']!,
-                      style: TextStyle(
-                        color: darkTheme ? Colors.white : Colors.black87,
-                        fontWeight: FontWeight.w700,
-                      ),
+                SizedBox(
+                  height: maxHeight,
+                  child: GridView.builder(
+                    padding: const EdgeInsets.only(bottom: 24),
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      crossAxisSpacing: 10,
+                      mainAxisSpacing: 10,
+                      childAspectRatio: 2.9,
                     ),
-                    subtitle: Text(
-                      o['native']!,
-                      style: TextStyle(
-                        color: darkTheme ? Colors.white70 : Colors.black54,
-                      ),
-                    ),
-                    trailing: o['code'] == currentCode
-                        ? Icon(
-                            Icons.check,
-                            color: darkTheme ? Colors.white : const Color(0xFF1A237E),
-                          )
-                        : null,
-                    onTap: o['code'] == disabledCode
-                        ? null
-                        : () {
-                            Navigator.of(ctx).pop();
-                            onPick(o['code']!);
-                          },
+                    itemCount: options.length,
+                    itemBuilder: (context, index) {
+                      final o = options[index];
+                      final bool selected = o['code'] == currentCode;
+                      final bool disabled = o['code'] == disabledCode;
+                      final bool isStudy = title == 'Study';
+                      final Color activeColor = isStudy
+                          ? const Color(0xFFB3E5FC)
+                          : const Color(0xFFB2FFB2);
+                      final Color baseColor =
+                          darkTheme ? const Color(0xFF263240) : Colors.white;
+                      final Color borderColor = darkTheme
+                          ? Colors.white24
+                          : const Color(0xFF1A237E).withValues(alpha: 0.12);
+                      return GestureDetector(
+                        onTap: disabled
+                            ? null
+                            : () {
+                                _playTapClick();
+                                Navigator.of(ctx).pop();
+                                onPick(o['code']!);
+                              },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 12,
+                          ),
+                          decoration: BoxDecoration(
+                            color: selected ? activeColor : baseColor,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: borderColor),
+                          ),
+                          child: Row(
+                            children: [
+                              Text(o['flag']!, style: const TextStyle(fontSize: 22)),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Text(
+                                      o['label']!,
+                                      style: TextStyle(
+                                        color: selected
+                                            ? Colors.black
+                                            : (darkTheme
+                                                ? Colors.white
+                                                : Colors.black87),
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 16,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      o['native']!,
+                                      style: TextStyle(
+                                        color: selected
+                                            ? Colors.black54
+                                            : (darkTheme
+                                                ? Colors.white60
+                                                : Colors.black54),
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (selected)
+                                Icon(
+                                  Icons.check,
+                                  size: 18,
+                                  color: selected ? Colors.black : Colors.white,
+                                ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
                   ),
+                ),
                 const SizedBox(height: 10),
               ],
             ),
@@ -1917,12 +2489,15 @@ class _FlashcardScreenState extends State<FlashcardScreen>
             Text(title, style: titleStyle),
             const SizedBox(height: 8),
             GestureDetector(
-              onTap: () => showPicker(
-                title: title,
-                currentCode: code,
-                disabledCode: disabledCode,
-                onPick: onPick,
-              ),
+              onTap: () {
+                _playTapClick();
+                showPicker(
+                  title: title,
+                  currentCode: code,
+                  disabledCode: disabledCode,
+                  onPick: onPick,
+                );
+              },
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
@@ -1944,7 +2519,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                             style: TextStyle(
                               color: textColor,
                               fontWeight: FontWeight.w800,
-                              fontSize: 16, // +25% from 13
+                              fontSize: 19,
                             ),
                           ),
                         ),
@@ -2203,7 +2778,11 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Create Custom List'),
+        backgroundColor: const Color(0xFFFDFBFF),
+        title: const Text(
+          'Create Custom List',
+          style: TextStyle(fontSize: 22),
+        ),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -2211,7 +2790,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                 TextField(
                   controller: listNameController,
                   autofocus: true,
-                  style: const TextStyle(fontSize: 18),
+                  style: const TextStyle(fontSize: 22),
                 decoration: InputDecoration(
                   labelText: 'List Name',
                   hintText: 'My Custom List',
@@ -2220,11 +2799,11 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                   helperMaxLines: 3,
                   helperStyle: TextStyle(
                     color: Colors.black.withValues(alpha: 0.55),
-                    fontSize: 14,
+                    fontSize: 17,
                   ),
                   labelStyle: const TextStyle(
                     color: accentBlue,
-                    fontSize: 18,
+                    fontSize: 22,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -2237,7 +2816,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
             onPressed: () => Navigator.pop(context),
             style: TextButton.styleFrom(
               foregroundColor: accentBlue,
-              textStyle: const TextStyle(fontSize: 18),
+              textStyle: const TextStyle(fontSize: 22),
             ),
             child: const Text('Cancel'),
           ),
@@ -2245,7 +2824,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
             style: ElevatedButton.styleFrom(
               backgroundColor: accentBlue,
               foregroundColor: Colors.white,
-              textStyle: const TextStyle(fontSize: 18),
+              textStyle: const TextStyle(fontSize: 22),
             ),
             onPressed: () {
               // --- CHANGE THIS CONDITION ---
@@ -3095,9 +3674,46 @@ class LanguageSelectionScreen extends StatefulWidget {
 class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
   String? studyLang;
   String? nativeLang;
+  bool isTransitioning = false;
+  String? pressedLang;
+  bool pressedIsNative = false;
+  bool tapSounds = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTapSounds();
+  }
+
+  Future<void> _loadTapSounds() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      tapSounds = prefs.getBool('tapSounds') ?? true;
+    });
+  }
+
+  void _playTapClick() {
+    // Best-effort: not all devices/platforms will play a click sound.
+    if (!tapSounds) return;
+    try {
+      unawaited(SystemSound.play(SystemSoundType.click));
+    } catch (_) {}
+    try {
+      unawaited(HapticFeedback.selectionClick());
+    } catch (_) {}
+  }
 
   void _selectStudy(String lang) {
-    setState(() => studyLang = lang);
+    setState(() {
+      isTransitioning = true;
+    });
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (!mounted) return;
+      setState(() {
+        studyLang = lang;
+        isTransitioning = false;
+      });
+    });
   }
 
   void _selectNative(String lang) async {
@@ -3113,9 +3729,31 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
     );
   }
 
+  Future<void> _flashAndSelect(String lang, {required bool native}) async {
+    _playTapClick();
+    setState(() {
+      pressedLang = lang;
+      pressedIsNative = native;
+    });
+    await Future.delayed(const Duration(milliseconds: 140));
+    if (!mounted) return;
+    setState(() {
+      pressedLang = null;
+    });
+    if (native) {
+      _selectNative(lang);
+    } else {
+      _selectStudy(lang);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final bool pickingNative = studyLang != null;
+    final bool pickingNative = studyLang != null && !isTransitioning;
+    final Color baseStudy = const Color(0xFFEAF2FF);
+    final Color baseNative = const Color(0xFFEAF8EE);
+    final Color pressedStudy = const Color(0xFFB3E5FC);
+    final Color pressedNative = const Color(0xFFB2FFB2);
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: _overlayStyleForTop(darkTop: false),
@@ -3147,120 +3785,192 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
           child: Center(
             child: Padding(
               padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _TitlePill(
-                text: pickingNative
-                    ? 'Your native language?'
-                    : 'What language to learn?',
-                backgroundColor: pickingNative
-                    ? const Color(0xFFE8F5E9) // soft light green
-                    : const Color(0xFFE3F2FD), // light blue
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.only(bottom: 24.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 40),
+                    _TitlePill(
+                      text: pickingNative
+                          ? 'Your native language?'
+                          : 'What language to learn?',
+                      backgroundColor: pickingNative
+                          ? const Color(0xFFB2FFB2) // active green
+                          : const Color(0xFFB3E5FC), // active blue
+                    ),
+                    const SizedBox(height: 48),
+
+                    // ENGLISH (only if not picking native English while study is English)
+                    if (!pickingNative || studyLang != 'en')
+                      _LanguageButton(
+                        flag: '\u{1F1FA}\u{1F1F8}',
+                        label: 'English',
+                        subLabel: pickingNative ? 'English' : 'Study English',
+                        color: pickingNative ? baseNative : baseStudy,
+                        pressedColor:
+                            pickingNative ? pressedNative : pressedStudy,
+                        isPressed:
+                            pressedLang == 'en' && pressedIsNative == pickingNative,
+                        onTap: () => _flashAndSelect(
+                          'en',
+                          native: pickingNative,
+                        ),
+                      ),
+                    if (!pickingNative || studyLang != 'en')
+                      const SizedBox(height: 24),
+
+                    // GERMAN
+                    if (!pickingNative || studyLang != 'de')
+                      _LanguageButton(
+                        flag: '\u{1F1E9}\u{1F1EA}',
+                        label: 'German',
+                        subLabel: pickingNative ? 'Deutsch' : 'Study German',
+                        color: pickingNative ? baseNative : baseStudy,
+                        pressedColor:
+                            pickingNative ? pressedNative : pressedStudy,
+                        isPressed:
+                            pressedLang == 'de' && pressedIsNative == pickingNative,
+                        onTap: () => _flashAndSelect(
+                          'de',
+                          native: pickingNative,
+                        ),
+                      ),
+                    if (!pickingNative || studyLang != 'de')
+                      const SizedBox(height: 24),
+
+                    // FRENCH
+                    if (!pickingNative || studyLang != 'fr')
+                      _LanguageButton(
+                        flag: '\u{1F1EB}\u{1F1F7}',
+                        label: 'French',
+                        subLabel: pickingNative ? 'Fran\u00E7ais' : 'Study French',
+                        color: pickingNative ? baseNative : baseStudy,
+                        pressedColor:
+                            pickingNative ? pressedNative : pressedStudy,
+                        isPressed:
+                            pressedLang == 'fr' && pressedIsNative == pickingNative,
+                        onTap: () => _flashAndSelect(
+                          'fr',
+                          native: pickingNative,
+                        ),
+                      ),
+                    if (!pickingNative || studyLang != 'fr')
+                      const SizedBox(height: 24),
+
+                    // ITALIAN
+                    if (!pickingNative || studyLang != 'it')
+                      _LanguageButton(
+                        flag: '\u{1F1EE}\u{1F1F9}',
+                        label: 'Italian',
+                        subLabel: pickingNative ? 'Italiano' : 'Study Italian',
+                        color: pickingNative ? baseNative : baseStudy,
+                        pressedColor:
+                            pickingNative ? pressedNative : pressedStudy,
+                        isPressed:
+                            pressedLang == 'it' && pressedIsNative == pickingNative,
+                        onTap: () => _flashAndSelect(
+                          'it',
+                          native: pickingNative,
+                        ),
+                      ),
+                    if (!pickingNative || studyLang != 'it')
+                      const SizedBox(height: 24),
+
+                    // SPANISH
+                    if (!pickingNative || studyLang != 'es')
+                      _LanguageButton(
+                        flag: '\u{1F1EA}\u{1F1F8}',
+                        label: 'Spanish',
+                        subLabel: pickingNative ? 'Espa\u00F1ol' : 'Study Spanish',
+                        color: pickingNative ? baseNative : baseStudy,
+                        pressedColor:
+                            pickingNative ? pressedNative : pressedStudy,
+                        isPressed:
+                            pressedLang == 'es' && pressedIsNative == pickingNative,
+                        onTap: () => _flashAndSelect(
+                          'es',
+                          native: pickingNative,
+                        ),
+                      ),
+                    if (!pickingNative || studyLang != 'es')
+                      const SizedBox(height: 24),
+
+                    // PORTUGUESE
+                    if (!pickingNative || studyLang != 'pt')
+                      _LanguageButton(
+                        flag: '\u{1F1F5}\u{1F1F9}',
+                        label: 'Portuguese',
+                        subLabel: pickingNative ? 'Portugu\u00EAs' : 'Study Portuguese',
+                        color: pickingNative ? baseNative : baseStudy,
+                        pressedColor:
+                            pickingNative ? pressedNative : pressedStudy,
+                        isPressed:
+                            pressedLang == 'pt' && pressedIsNative == pickingNative,
+                        onTap: () => _flashAndSelect(
+                          'pt',
+                          native: pickingNative,
+                        ),
+                      ),
+                    if (!pickingNative || studyLang != 'pt')
+                      const SizedBox(height: 24),
+
+                    // TURKISH
+                    if (!pickingNative || studyLang != 'tr')
+                      _LanguageButton(
+                        flag: '\u{1F1F9}\u{1F1F7}',
+                        label: 'Turkish',
+                        subLabel: pickingNative ? 'T\u00FCrk\u00E7e' : 'Study Turkish',
+                        color: pickingNative ? baseNative : baseStudy,
+                        pressedColor:
+                            pickingNative ? pressedNative : pressedStudy,
+                        isPressed:
+                            pressedLang == 'tr' && pressedIsNative == pickingNative,
+                        onTap: () => _flashAndSelect(
+                          'tr',
+                          native: pickingNative,
+                        ),
+                      ),
+                    if (!pickingNative || studyLang != 'tr')
+                      const SizedBox(height: 24),
+
+                    // UKRAINIAN
+                    if (!pickingNative || studyLang != 'uk')
+                      _LanguageButton(
+                        flag: '\u{1F1FA}\u{1F1E6}',
+                        label: 'Ukrainian',
+                        subLabel: pickingNative
+                            ? '\u0423\u043A\u0440\u0430\u0457\u043D\u0441\u044C\u043A\u0430'
+                            : 'Study Ukrainian',
+                        color: pickingNative ? baseNative : baseStudy,
+                        pressedColor:
+                            pickingNative ? pressedNative : pressedStudy,
+                        isPressed:
+                            pressedLang == 'uk' && pressedIsNative == pickingNative,
+                        onTap: () => _flashAndSelect(
+                          'uk',
+                          native: pickingNative,
+                        ),
+                      ),
+
+                    if (pickingNative) ...[
+                      const SizedBox(height: 32),
+                      TextButton(
+                        onPressed: () {
+                          _playTapClick();
+                          setState(() => studyLang = null);
+                        },
+                        child: const Text('Back to Study Language'),
+                      )
+                    ]
+                  ],
+                ),
               ),
-              const SizedBox(height: 48),
-
-              // ENGLISH (only if not picking native English while study is English)
-              if (!pickingNative || studyLang != 'en')
-                _LanguageButton(
-                  flag: '\u{1F1FA}\u{1F1F8}',
-                  label: 'English',
-                  subLabel: pickingNative ? 'English' : 'Study English',
-                  color: const Color(0xFFE8EAF6),
-                  onTap: () => pickingNative ? _selectNative('en') : _selectStudy('en'),
-                ),
-              if (!pickingNative || studyLang != 'en') const SizedBox(height: 24),
-
-              // GERMAN
-              if (!pickingNative || studyLang != 'de')
-                _LanguageButton(
-                  flag: '\u{1F1E9}\u{1F1EA}',
-                  label: 'German',
-                  subLabel: pickingNative ? 'Deutsch' : 'Study German',
-                  color: const Color(0xFFF1F8E9),
-                  onTap: () => pickingNative ? _selectNative('de') : _selectStudy('de'),
-                ),
-              if (!pickingNative || studyLang != 'de') const SizedBox(height: 24),
-
-              // FRENCH
-              if (!pickingNative || studyLang != 'fr')
-                _LanguageButton(
-                  flag: '\u{1F1EB}\u{1F1F7}',
-                  label: 'French',
-                  subLabel: pickingNative ? 'Fran\u00E7ais' : 'Study French',
-                  color: const Color(0xFFE3F2FD),
-                  onTap: () => pickingNative ? _selectNative('fr') : _selectStudy('fr'),
-                ),
-              if (!pickingNative || studyLang != 'fr') const SizedBox(height: 24),
-
-              // ITALIAN
-              if (!pickingNative || studyLang != 'it')
-                _LanguageButton(
-                  flag: '\u{1F1EE}\u{1F1F9}',
-                  label: 'Italian',
-                  subLabel: pickingNative ? 'Italiano' : 'Study Italian',
-                  color: const Color(0xFFFFF3E0),
-                  onTap: () => pickingNative ? _selectNative('it') : _selectStudy('it'),
-                ),
-              if (!pickingNative || studyLang != 'it') const SizedBox(height: 24),
-
-              // SPANISH
-              if (!pickingNative || studyLang != 'es')
-                _LanguageButton(
-                  flag: '\u{1F1EA}\u{1F1F8}',
-                  label: 'Spanish',
-                  subLabel: pickingNative ? 'Espa\u00F1ol' : 'Study Spanish',
-                  color: const Color(0xFFFFF3E0),
-                  onTap: () => pickingNative ? _selectNative('es') : _selectStudy('es'),
-                ),
-              if (!pickingNative || studyLang != 'es') const SizedBox(height: 24),
-
-              // PORTUGUESE
-              if (!pickingNative || studyLang != 'pt')
-                _LanguageButton(
-                  flag: '\u{1F1F5}\u{1F1F9}',
-                  label: 'Portuguese',
-                  subLabel: pickingNative ? 'Portugu\u00EAs' : 'Study Portuguese',
-                  color: const Color(0xFFE8F5E9),
-                  onTap: () => pickingNative ? _selectNative('pt') : _selectStudy('pt'),
-                ),
-              if (!pickingNative || studyLang != 'pt') const SizedBox(height: 24),
-
-              // TURKISH
-              if (!pickingNative || studyLang != 'tr')
-                _LanguageButton(
-                  flag: '\u{1F1F9}\u{1F1F7}',
-                  label: 'Turkish',
-                  subLabel: pickingNative ? 'T\u00FCrk\u00E7e' : 'Study Turkish',
-                  color: const Color(0xFFE8EAF6),
-                  onTap: () => pickingNative ? _selectNative('tr') : _selectStudy('tr'),
-                ),
-              if (!pickingNative || studyLang != 'tr') const SizedBox(height: 24),
-
-              // UKRAINIAN
-              if (!pickingNative || studyLang != 'uk')
-                _LanguageButton(
-                  flag: '\u{1F1FA}\u{1F1E6}',
-                  label: 'Ukrainian',
-                  subLabel: pickingNative ? '\u0423\u043A\u0440\u0430\u0457\u043D\u0441\u044C\u043A\u0430' : 'Study Ukrainian',
-                  color: const Color(0xFFE3F2FD),
-                  onTap: () => pickingNative ? _selectNative('uk') : _selectStudy('uk'),
-                ),
-
-              if (pickingNative) ...[
-                 const SizedBox(height: 32),
-                 TextButton(
-                    onPressed: () => setState(() => studyLang = null),
-                    child: const Text('← Back to Study Language'),
-                 )
-              ]
-            ],
-          ),
             ),
           ),
         ),
-        ),
       ),
+    ),
     );
   }
 }
@@ -3311,6 +4021,8 @@ class _LanguageButton extends StatelessWidget {
   final String label;
   final String subLabel;
   final Color color;
+  final Color? pressedColor;
+  final bool isPressed;
   final VoidCallback onTap;
 
   const _LanguageButton({
@@ -3318,6 +4030,8 @@ class _LanguageButton extends StatelessWidget {
     required this.label,
     required this.subLabel,
     required this.color,
+    this.pressedColor,
+    this.isPressed = false,
     required this.onTap,
   });
 
@@ -3325,11 +4039,12 @@ class _LanguageButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
         width: double.infinity,
         padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 24),
         decoration: BoxDecoration(
-          color: color,
+          color: isPressed && pressedColor != null ? pressedColor : color,
           borderRadius: BorderRadius.circular(24),
           border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
           boxShadow: [
