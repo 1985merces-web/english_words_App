@@ -9,8 +9,8 @@ from urllib import error, request
 from urllib.parse import urlencode
 
 
-EN_CSV = os.getenv("EN_CSV", "assets/sets/en.csv")
-PT_CSV = os.getenv("PT_CSV", "assets/sets/pt.csv")
+EN_CSV = os.getenv("EN_CSV", "assets/data/sets/en.csv")
+PT_CSV = os.getenv("PT_CSV", "assets/data/sets/pt.csv")
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 PROVIDER = os.getenv("PROVIDER", "auto").strip().lower()  # auto | openai | google
 

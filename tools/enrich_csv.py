@@ -12,9 +12,9 @@ from openai import OpenAI
 
 load_dotenv()
 
-INPUT_PATH = os.getenv("INPUT_CSV", "assets/sets/combined_words.csv")
-OUTPUT_PATH = os.getenv("OUTPUT_CSV", "assets/sets/new_combined_words.csv")
-CHECKPOINT_PATH = os.getenv("CHECKPOINT_JSON", "assets/sets/new_combined_words.checkpoint.json")
+INPUT_PATH = os.getenv("INPUT_CSV", "assets/data/sets/combined_words.csv")
+OUTPUT_PATH = os.getenv("OUTPUT_CSV", "assets/data/sets/new_combined_words.csv")
+CHECKPOINT_PATH = os.getenv("CHECKPOINT_JSON", "assets/data/sets/new_combined_words.checkpoint.json")
 
 MODEL = os.getenv("OPENAI_MODEL", "gpt-5")  # можна змінити, напр. gpt-4o-mini
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "40"))  # 25–60 зазвичай ок

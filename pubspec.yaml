@@ -32,6 +32,6 @@ flutter_launcher_icons:
 flutter:
   uses-material-design: true
   assets:
-    - assets/sets/
+    - assets/data/sets/
     - assets/icons/
     - assets/images/LogoMain.svg

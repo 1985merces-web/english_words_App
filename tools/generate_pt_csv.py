@@ -7,8 +7,8 @@ from typing import Dict, List, Tuple
 from urllib import request, error
 
 
-INPUT_CSV = os.getenv("INPUT_CSV", "assets/sets/en.csv")
-OUTPUT_CSV = os.getenv("OUTPUT_CSV", "assets/sets/pt.csv")
+INPUT_CSV = os.getenv("INPUT_CSV", "assets/data/sets/en.csv")
+OUTPUT_CSV = os.getenv("OUTPUT_CSV", "assets/data/sets/pt.csv")
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "40"))
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "6"))
