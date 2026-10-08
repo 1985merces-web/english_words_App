@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:ui' show ImageFilter;
 import 'package:audio_session/audio_session.dart';
 import 'package:csv/csv.dart';
 import 'package:flutter/foundation.dart';
@@ -13,14 +14,190 @@ import 'package:flutter/services.dart'
         SystemNavigator,
         SystemSound,
         SystemSoundType,
-        rootBundle;
+        rootBundle,
+        Clipboard,
+        ClipboardData;
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/word_entry.dart';
+import '../models/language_catalog.dart';
 import '../utils/system_ui.dart';
+import '../services/ad_helper.dart';
+import '../services/billing_service.dart';
+import 'reader_screen.dart';
+
+class _LiquidGlassSurface extends StatelessWidget {
+  const _LiquidGlassSurface({
+    required this.tint,
+    required this.dark,
+    required this.child,
+  });
+
+  final Color tint;
+  final bool dark;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    const radius = BorderRadius.all(Radius.circular(22));
+    final Color darkBase = Color.lerp(const Color(0xFF0A2330), tint, 0.42)!;
+    final Color darkBaseEnd = Color.lerp(darkBase, Colors.black, 0.16)!;
+    final List<Color> glassColors = dark
+        ? [
+            darkBase.withValues(alpha: 0.94),
+            darkBase.withValues(alpha: 0.97),
+            darkBaseEnd.withValues(alpha: 0.98),
+          ]
+        : [
+            Colors.white.withValues(alpha: 0.48),
+            tint.withValues(alpha: 0.38),
+            tint.withValues(alpha: 0.22),
+          ];
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: radius,
+        boxShadow: [
+          BoxShadow(
+            color: tint.withValues(alpha: dark ? 0.18 : 0.18),
+            blurRadius: 22,
+            offset: const Offset(0, 10),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: dark ? 0.26 : 0.08),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: radius,
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: glassColors,
+                stops: const [0, 0.45, 1],
+              ),
+              borderRadius: radius,
+              border: Border.all(
+                color: Colors.white.withValues(alpha: dark ? 0.48 : 0.72),
+                width: 1.2,
+              ),
+            ),
+            child: child,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _GlassIconSurface extends StatelessWidget {
+  const _GlassIconSurface({
+    required this.size,
+    required this.dark,
+    required this.child,
+  });
+
+  final double size;
+  final bool dark;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: dark ? 0.16 : 0.42),
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: Colors.white.withValues(alpha: dark ? 0.48 : 0.68),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: dark ? 0.22 : 0.08),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Center(child: child),
+    );
+  }
+}
+
+class _AdaptiveCardText extends StatelessWidget {
+  const _AdaptiveCardText({
+    required this.text,
+    required this.style,
+    required this.maxLines,
+    required this.maxHeight,
+    required this.minFontSize,
+  });
+
+  final String text;
+  final TextStyle style;
+  final int maxLines;
+  final double maxHeight;
+  final double minFontSize;
+
+  double _fontSizeFor(BuildContext context, double maxWidth) {
+    final initialFontSize = style.fontSize ?? 14;
+    final textDirection = Directionality.of(context);
+    final textScaler = MediaQuery.textScalerOf(context);
+    final usableWidth = math.max(0.0, maxWidth - 12.0);
+
+    for (double size = initialFontSize; size >= minFontSize; size -= 0.5) {
+      final painter = TextPainter(
+        text: TextSpan(text: text, style: style.copyWith(fontSize: size)),
+        textAlign: TextAlign.center,
+        textDirection: textDirection,
+        textScaler: textScaler,
+        maxLines: maxLines,
+      )..layout(maxWidth: usableWidth);
+
+      if (!painter.didExceedMaxLines && painter.height <= maxHeight) {
+        return size;
+      }
+    }
+
+    return minFontSize;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (!constraints.hasBoundedWidth || constraints.maxWidth <= 0) {
+          return Text(text, style: style, textAlign: TextAlign.center);
+        }
+
+        return SizedBox(
+          width: constraints.maxWidth,
+          child: Text(
+            text,
+            style: style.copyWith(
+              fontSize: _fontSizeFor(context, constraints.maxWidth),
+            ),
+            textAlign: TextAlign.center,
+            softWrap: true,
+            maxLines: maxLines,
+            overflow: TextOverflow.clip,
+            textWidthBasis: TextWidthBasis.parent,
+          ),
+        );
+      },
+    );
+  }
+}
 
 class FlashcardScreen extends StatefulWidget {
   final bool showENasDefault;
@@ -48,7 +225,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
   int currentIndex = 0;
   String selectedLevel = '';
   String selectedSublist = '';
-  String studyLang = 'en';  // Language being learned
+  String studyLang = 'en'; // Language being learned
   String nativeLang = 'uk'; // User's native language
 
   // Inline words menu state
@@ -76,11 +253,14 @@ class _FlashcardScreenState extends State<FlashcardScreen>
 
   // Add this to track loading state
   bool isLoading = true;
+  List<String> unwantedWords = [];
 
   // Add this to your class variables
   Map<String, String> enUkDictionary = {};
+  Map<String, String> englishContextSentences = {};
   List<String> allCustomListNames = [];
   List<WordEntry> _customEntries = []; // Cache for starred and custom words
+  Map<String, List<String>>? _groupedListsCache;
   AudioSession? _audioSession;
   StreamSubscription<AudioInterruptionEvent>? _audioInterruptionSub;
   StreamSubscription<void>? _becomingNoisySub;
@@ -103,11 +283,13 @@ class _FlashcardScreenState extends State<FlashcardScreen>
   @override
   void initState() {
     super.initState();
+    AdHelper.loadInterstitialAd();
     WidgetsBinding.instance.addObserver(this);
     _loadSettings();
     loadWords();
     _loadDictionary();
     _setupAudioSession();
+    _loadUnwantedWords();
     // Best-effort: some platforms may not support awaiting completion.
     flutterTts.awaitSpeakCompletion(true).catchError((_) {});
   }
@@ -191,6 +373,137 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       sleepTimerLoop = prefs.getBool('sleepTimerLoop') ?? true;
       uiUseNative = prefs.getBool('uiUseNative') ?? false;
     });
+  }
+
+  Future<void> _loadUnwantedWords() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      unwantedWords = prefs.getStringList('unwanted_words') ?? [];
+    });
+  }
+
+  Future<void> _toggleUnwantedWord(String word) async {
+    final prefs = await SharedPreferences.getInstance();
+    final lowerWord = word.trim().toLowerCase();
+    setState(() {
+      if (unwantedWords.contains(lowerWord)) {
+        unwantedWords.remove(lowerWord);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Слово "$word" вилучено зі списку непотрібних слів.'),
+            duration: const Duration(seconds: 1),
+          ),
+        );
+      } else {
+        unwantedWords.add(lowerWord);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Слово "$word" додано до списку непотрібних слів.'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    });
+    await prefs.setStringList('unwanted_words', unwantedWords);
+    print('VOLARY_UNWANTED_WORDS: $unwantedWords');
+  }
+
+  void _showUnwantedWordsDialog() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final textToCopy = unwantedWords.join('\n');
+            return AlertDialog(
+              backgroundColor:
+                  darkTheme ? const Color(0xFF1E2A3A) : Colors.white,
+              title: Text(
+                'Непотрібні слова (${unwantedWords.length})',
+                style:
+                    TextStyle(color: darkTheme ? Colors.white : Colors.black),
+              ),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: unwantedWords.isEmpty
+                    ? Text(
+                        'Список порожній. Помічайте непотрібні слова значком кошика на картках.',
+                        style: TextStyle(
+                            color: darkTheme ? Colors.white70 : Colors.black87),
+                      )
+                    : Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: Container(
+                              constraints: const BoxConstraints(maxHeight: 300),
+                              decoration: BoxDecoration(
+                                border: Border.all(color: Colors.grey.shade400),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: ListView.builder(
+                                shrinkWrap: true,
+                                itemCount: unwantedWords.length,
+                                itemBuilder: (context, index) {
+                                  final word = unwantedWords[index];
+                                  return ListTile(
+                                    title: Text(
+                                      word,
+                                      style: TextStyle(
+                                          color: darkTheme
+                                              ? Colors.white
+                                              : Colors.black),
+                                    ),
+                                    trailing: IconButton(
+                                      icon: const Icon(Icons.close,
+                                          color: Colors.red),
+                                      onPressed: () {
+                                        setState(() {
+                                          unwantedWords.remove(word);
+                                        });
+                                        setDialogState(() {});
+                                        SharedPreferences.getInstance()
+                                            .then((prefs) {
+                                          prefs.setStringList(
+                                              'unwanted_words', unwantedWords);
+                                        });
+                                      },
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          ElevatedButton.icon(
+                            onPressed: () {
+                              Clipboard.setData(
+                                  ClipboardData(text: textToCopy));
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                      'Список скопійовано в буфер обміну!'),
+                                  duration: Duration(seconds: 1),
+                                ),
+                              );
+                            },
+                            icon: const Icon(Icons.copy),
+                            label: const Text('Скопіювати список'),
+                          ),
+                        ],
+                      ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Закрити'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   static const Map<String, Map<String, String>> _uiStrings = {
@@ -321,8 +634,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       'processing_words': 'Procesando palabras',
       'finding_translations': 'Buscando traducciones...',
       'could_not_open': 'No se pudo abrir',
-      'removed_from_custom':
-          'Se elimino "{word}" de la lista personalizada.',
+      'removed_from_custom': 'Se elimino "{word}" de la lista personalizada.',
       'error_creating_list': 'Error al crear la lista',
       'delete_list': 'Eliminar lista',
       'delete_confirm':
@@ -366,8 +678,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       'processing_words': 'Processando palavras',
       'finding_translations': 'Procurando traducoes...',
       'could_not_open': 'Nao foi possivel abrir',
-      'removed_from_custom':
-          'Removido "{word}" da lista personalizada.',
+      'removed_from_custom': 'Removido "{word}" da lista personalizada.',
       'error_creating_list': 'Erro ao criar a lista',
       'delete_list': 'Excluir lista',
       'delete_confirm':
@@ -411,8 +722,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       'processing_words': 'Worter werden verarbeitet',
       'finding_translations': 'Ubersetzungen werden gesucht...',
       'could_not_open': 'Konnte nicht offnen',
-      'removed_from_custom':
-          '"{word}" wurde aus der eigenen Liste entfernt.',
+      'removed_from_custom': '"{word}" wurde aus der eigenen Liste entfernt.',
       'error_creating_list': 'Fehler beim Erstellen der Liste',
       'delete_list': 'Liste loschen',
       'delete_confirm':
@@ -501,8 +811,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       'processing_words': 'Elaborazione parole',
       'finding_translations': 'Ricerca traduzioni...',
       'could_not_open': 'Impossibile aprire',
-      'removed_from_custom':
-          'Rimosso "{word}" dalla lista personalizzata.',
+      'removed_from_custom': 'Rimosso "{word}" dalla lista personalizzata.',
       'error_creating_list': 'Errore nella creazione della lista',
       'delete_list': 'Elimina lista',
       'delete_confirm':
@@ -546,8 +855,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       'processing_words': 'Kelimeler isleniyor',
       'finding_translations': 'Ceviriler bulunuyor...',
       'could_not_open': 'Acilamadi',
-      'removed_from_custom':
-          '"{word}" ozel listeden kaldirildi.',
+      'removed_from_custom': '"{word}" ozel listeden kaldirildi.',
       'error_creating_list': 'Liste olusturma hatasi',
       'delete_list': 'Listeyi sil',
       'delete_confirm':
@@ -566,21 +874,42 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     return _uiStrings[code]?[key] ?? _uiStrings['en']![key] ?? key;
   }
 
-  static const Map<String, String> _languageLabel = {
-    'en': 'English',
-    'es': 'Spanish',
-    'pt': 'Portuguese',
-    'uk': 'Ukrainian',
-    'de': 'German',
-    'fr': 'French',
-    'it': 'Italian',
-    'tr': 'Turkish',
-  };
-
   // --- ADD THIS NEW METHOD ---
   Future<void> _loadCustomListNames() async {
     final prefs = await SharedPreferences.getInstance();
     allCustomListNames = prefs.getStringList('custom_list_names') ?? [];
+    _invalidateGroupedLists();
+  }
+
+  Future<Map<String, String>> _loadEnglishContextSentences() async {
+    if (englishContextSentences.isNotEmpty) return englishContextSentences;
+
+    try {
+      final rawData =
+          await rootBundle.loadString('assets/data/sets/master_en.jsonl');
+      final Map<String, String> contexts = {};
+      for (final line in rawData.split('\n')) {
+        final trimmed = line.trim();
+        if (trimmed.isEmpty) continue;
+        final decoded = jsonDecode(trimmed);
+        if (decoded is! Map<String, dynamic>) continue;
+        final lemma = (decoded['lemma'] ?? '').toString().trim().toLowerCase();
+        final sentence = (decoded['context_sentence'] ?? '').toString().trim();
+        if (lemma.isNotEmpty && sentence.isNotEmpty) {
+          contexts[lemma] = sentence;
+        }
+      }
+      englishContextSentences = contexts;
+    } catch (e) {
+      debugPrint('Error loading English context sentences: $e');
+      englishContextSentences = {};
+    }
+
+    return englishContextSentences;
+  }
+
+  void _invalidateGroupedLists() {
+    _groupedListsCache = null;
   }
 
   Future<void> _setTargetCustomSet(String listName) async {
@@ -641,20 +970,11 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     await _loadCustomListNames();
 
     final prefs = await SharedPreferences.getInstance();
-    const allowedLangs = {
-      'en',
-      'es',
-      'pt',
-      'uk',
-      'de',
-      'fr',
-      'it',
-      'tr',
-    };
     String prefStudy = prefs.getString('study_language') ?? 'en';
     String prefNative = prefs.getString('native_language') ?? 'uk';
-    if (!allowedLangs.contains(prefStudy)) prefStudy = 'en';
-    if (!allowedLangs.contains(prefNative)) prefNative = 'uk';
+    if (!LanguageCatalog.isAvailable(prefStudy)) prefStudy = 'en';
+    if (!LanguageCatalog.isAvailable(prefNative)) prefNative = 'uk';
+    if (prefStudy == prefNative) prefNative = prefStudy == 'en' ? 'uk' : 'en';
 
     List<List<dynamic>> parseCsv(String data) {
       List<List<dynamic>> table = const CsvToListConverter().convert(data);
@@ -669,6 +989,21 @@ class _FlashcardScreenState extends State<FlashcardScreen>
 
     Future<List<WordEntry>> loadPair(String sLang, String nLang) async {
       try {
+        String cleanSecondaryTranslation(String primary, String rawSecondary) {
+          final secondary = rawSecondary.trim();
+          final normalizedPrimary =
+              primary.trim().toLowerCase().replaceAll(RegExp(r's+'), ' ');
+          final normalizedSecondary =
+              secondary.toLowerCase().replaceAll(RegExp(r's+'), ' ');
+          if (secondary.isEmpty || normalizedPrimary == normalizedSecondary)
+            return '';
+          if (RegExp(r'[⺀-鿿]').hasMatch(secondary)) return '';
+          return secondary;
+        }
+
+        final contextSentences = sLang == 'en'
+            ? await _loadEnglishContextSentences()
+            : const <String, String>{};
         final String studyPath = 'assets/data/sets/$sLang.csv';
         final String nativePath = 'assets/data/sets/$nLang.csv';
         final ByteData studyBytes = await rootBundle.load(studyPath);
@@ -681,7 +1016,8 @@ class _FlashcardScreenState extends State<FlashcardScreen>
 
         final studyTable = parseCsv(studyData);
         final nativeTable = parseCsv(nativeData);
-        final int rowsToProcess = math.min(studyTable.length, nativeTable.length);
+        final int rowsToProcess =
+            math.min(studyTable.length, nativeTable.length);
 
         List<WordEntry> loadedWords = [];
         for (int i = 1; i < rowsToProcess; i++) {
@@ -694,16 +1030,24 @@ class _FlashcardScreenState extends State<FlashcardScreen>
             final sublist = sRow[1].toString().trim();
             final wordMain = sRow[2].toString().trim();
             final trans1 = nRow[2].toString().trim();
+            final trans2 = nRow.length > 3
+                ? cleanSecondaryTranslation(trans1, nRow[3].toString())
+                : '';
             if (wordMain.isEmpty || trans1.isEmpty) continue;
+            final contextSentence =
+                contextSentences[wordMain.toLowerCase()] ?? '';
 
             loadedWords.add(WordEntry(
               level,
               sublist,
               wordMain,
               trans1,
-              '', '', '', '',
+              contextSentence,
+              '',
+              '',
+              '',
               sRow.length > 3 ? sRow[3].toString().trim() : '',
-              nRow.length > 3 ? nRow[3].toString().trim() : '',
+              trans2,
             ));
           } catch (rowError) {
             debugPrint('Skipping row $i due to error: $rowError');
@@ -733,6 +1077,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
 
     // Merge predefined and custom lists
     allWords.addAll(_customEntries);
+    _invalidateGroupedLists();
 
     // Pick default by CEFR order, then numeric sublist
     final grouped = getGroupedLists();
@@ -808,7 +1153,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     if (langCode == 'fr') ttsLang = "fr-FR";
     if (langCode == 'it') ttsLang = "it-IT";
     if (langCode == 'tr') ttsLang = "tr-TR";
-    
+
     await flutterTts.setLanguage(ttsLang);
     await flutterTts.setSpeechRate(0.5);
     await flutterTts.speak(text);
@@ -831,6 +1176,9 @@ class _FlashcardScreenState extends State<FlashcardScreen>
         gridPage = 0;
       } else if (gridPage >= maxPage) {
         gridPage = 0;
+        if (!BillingService().isPremium) {
+          AdHelper.showInterstitialAd(onAdClosed: () {});
+        }
       } else {
         gridPage++;
       }
@@ -874,7 +1222,8 @@ class _FlashcardScreenState extends State<FlashcardScreen>
 
     for (int li = levelIdx; li < levels.length; li++) {
       final lvl = levels[li];
-      final subs = List<String>.from(grouped[lvl] ?? [])..sort(_compareSublists);
+      final subs = List<String>.from(grouped[lvl] ?? [])
+        ..sort(_compareSublists);
       if (subs.isEmpty) continue;
 
       int startSubIdx = 0;
@@ -911,8 +1260,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     // Determine start index for single or grid mode
     int startIdx = gridMode ? gridPage * _cardsPerGridPage : currentIndex;
 
-    Future<void> speakEntry(WordEntry entry,
-        {required bool studyFirst}) async {
+    Future<void> speakEntry(WordEntry entry, {required bool studyFirst}) async {
       if (studyFirst) {
         await _speakStudy(entry.wordMain);
         if (!isPlaying) return;
@@ -941,7 +1289,10 @@ class _FlashcardScreenState extends State<FlashcardScreen>
         final len = currentSetWords.length;
         order = List<int>.generate(len, (i) => i);
         order.shuffle(rng);
-        if (lastIdx != null && len > 1 && order.isNotEmpty && order.first == lastIdx) {
+        if (lastIdx != null &&
+            len > 1 &&
+            order.isNotEmpty &&
+            order.first == lastIdx) {
           final swap = 1 + rng.nextInt(len - 1);
           final tmp = order[0];
           order[0] = order[swap];
@@ -1091,8 +1442,12 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     // Larger cards for single view
     final desiredCardWidth = math.max(safeWidth * 0.65, 170.0);
     final cardWidth = math.min(desiredCardWidth, safeWidth);
-    final cardHeight = math.max(140.0, cardWidth * 0.52); // Increased height (+30%)
-    final double singleCardSectionHeight = cardHeight + 48.0;
+    final cardHeight =
+        math.max(140.0, cardWidth * 0.52); // Increased height (+30%)
+    const double singleCardGapHeight = 18.0;
+    const double singleCardExamplesHeight = 56.0;
+    final double singleCardSectionHeight =
+        cardHeight + singleCardGapHeight + singleCardExamplesHeight;
     final bool isWideGrid = safeWidth >= 420.0;
     final double bottomSafePadding = mediaQuery.viewPadding.bottom;
     const double bottomBarHeight = 72.0;
@@ -1100,8 +1455,9 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     final double sliderHorizontalPadding = math.max(16.0, screenWidth * 0.06);
     final double settingsWidth = math.min(safeWidth, 420.0);
     // Raise the slider overlay (~30% up from the bottom, but never below the bar)
-    final enWord =
-        currentSetWords.isNotEmpty ? currentSetWords[currentIndex].wordMain : '';
+    final enWord = currentSetWords.isNotEmpty
+        ? currentSetWords[currentIndex].wordMain
+        : '';
     final ukWord =
         currentSetWords.isNotEmpty ? currentSetWords[currentIndex].trans1 : '';
     final example1 = currentSetWords.isNotEmpty
@@ -1110,47 +1466,66 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     final example2 = currentSetWords.isNotEmpty
         ? currentSetWords[currentIndex].example2
         : '';
+    final cardExamples = [example1, example2]
+        .where((example) => example.trim().isNotEmpty)
+        .toList();
 
-    final entry = currentSetWords.isNotEmpty ? currentSetWords[currentIndex] : null;
+    final entry =
+        currentSetWords.isNotEmpty ? currentSetWords[currentIndex] : null;
+    final groupedLists = getGroupedLists();
 
     Widget centeredWordBlock({
       required String main,
       required TextStyle mainStyle,
+      required bool compact,
+      int mainMaxLines = 2,
       String? secondary,
       TextStyle? secondaryStyle,
       List<String>? examples,
       TextStyle? exampleStyle,
     }) {
-      final cleanedSecondary = (secondary ?? '').trim();
-      final cleanedExamples = (examples ?? []).where((e) => e.trim().isNotEmpty).toList();
+      var cleanedSecondary = (secondary ?? '').trim();
+      if (cleanedSecondary.toLowerCase() == main.trim().toLowerCase()) {
+        cleanedSecondary = '';
+      }
+      final cleanedExamples =
+          (examples ?? []).where((e) => e.trim().isNotEmpty).toList();
+      final mainMaxHeight = compact ? 52.0 : 84.0;
+      final secondaryMaxHeight = compact ? 24.0 : 34.0;
 
-      return Stack(
-        alignment: Alignment.center,
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Align(
-            alignment: Alignment.center,
-            child: Text(main, style: mainStyle, textAlign: TextAlign.center),
+          _AdaptiveCardText(
+            text: main,
+            style: mainStyle,
+            maxLines: mainMaxLines,
+            maxHeight: mainMaxHeight,
+            minFontSize: compact ? 10 : 16,
           ),
-          if (cleanedSecondary.isNotEmpty)
-            Align(
-              alignment: const Alignment(0, 0.55),
-              child: Text(
-                cleanedSecondary,
-                style: secondaryStyle,
+          if (cleanedSecondary.isNotEmpty) ...[
+            const SizedBox(height: 3),
+            _AdaptiveCardText(
+              text: cleanedSecondary,
+              style: secondaryStyle ?? mainStyle,
+              maxHeight: secondaryMaxHeight,
+              maxLines: 1,
+              minFontSize: compact ? 10 : 12,
+            ),
+          ],
+          if (cleanedExamples.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            for (final ex in cleanedExamples)
+              Text(
+                ex,
+                style: exampleStyle,
                 textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
               ),
-            ),
-          if (cleanedExamples.isNotEmpty)
-            Align(
-              alignment: const Alignment(0, 0.88),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  for (final ex in cleanedExamples)
-                    Text(ex, style: exampleStyle, textAlign: TextAlign.center),
-                ],
-              ),
-            ),
+          ],
         ],
       );
     }
@@ -1192,165 +1567,185 @@ class _FlashcardScreenState extends State<FlashcardScreen>
               duration: const Duration(milliseconds: 250),
               transitionBuilder: (child, animation) =>
                   FadeTransition(opacity: animation, child: child),
-              child: Container(
+              child: SizedBox(
                 key: ValueKey(
                     '$currentIndex-$showENFace'), // <-- add currentIndex to key for animation
                 width: cardWidth,
                 height: cardHeight,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: showENFace
-                      ? const Color(0xFFB3E5FC)
-                      : const Color(0xFFB2FFB2),
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: Stack(
-                  children: [
-                    Positioned(
-                      top: 12,
-                      left: 12,
-                      child: GestureDetector(
-                        onTap: () {
-                          _playTapClick();
-                          if (currentSetWords.isNotEmpty) {
-                            // Check if we're in a custom list
-                            if (selectedLevel == 'custom') {
-                              _removeWordFromCustomList(
-                                  currentSetWords[currentIndex]);
-                            } else {
-                              _addWordToCustomSet(
-                                  currentSetWords[currentIndex]);
+                child: _LiquidGlassSurface(
+                  tint: showENFace
+                      ? const Color(0xFF4FC3F7)
+                      : const Color(0xFF66BB6A),
+                  dark: darkTheme,
+                  child: Stack(
+                    children: [
+                      Positioned(
+                        top: 12,
+                        left: 12,
+                        child: GestureDetector(
+                          onTap: () {
+                            _playTapClick();
+                            if (currentSetWords.isNotEmpty) {
+                              // Check if we're in a custom list
+                              if (selectedLevel == 'custom') {
+                                _removeWordFromCustomList(
+                                    currentSetWords[currentIndex]);
+                              } else {
+                                _addWordToCustomSet(
+                                    currentSetWords[currentIndex]);
+                              }
                             }
-                          }
-                        },
-                        child: Container(
-                          width: 35,
-                          height: 38,
-                          decoration: BoxDecoration(
-                            color:
-                                const Color(0xFFE3F2FD).withValues(alpha: 0.8),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Center(
+                          },
+                          child: _GlassIconSurface(
+                            size: 38,
+                            dark: darkTheme,
                             child: Icon(
                               selectedLevel == 'custom'
                                   ? Icons.delete_outline
                                   : Icons.star_border,
                               color: selectedLevel == 'custom'
-                                  ? Colors.blueGrey.shade400
-                                  : Colors.blueGrey.shade600,
+                                  ? (darkTheme
+                                      ? Colors.redAccent.shade100
+                                      : Colors.blueGrey.shade500)
+                                  : (darkTheme
+                                      ? Colors.white.withValues(alpha: 0.92)
+                                      : const Color(0xFF25455F)),
                               size: 22,
                             ),
                           ),
                         ),
                       ),
-                    ),
-                    Center(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 40.0),
-                        child: centeredWordBlock(
-                          main: showENFace ? enWord : ukWord,
-                          mainStyle: TextStyle(
-                            color: showENFace ? Colors.black : const Color(0xFFB71C1C),
-                            fontFamily: 'Inter',
-                            fontWeight: FontWeight.w700,
-                            fontSize: showENFace ? 34 : 27,
-                            height: 1.1,
+                      Center(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 40.0),
+                          child: centeredWordBlock(
+                            main: showENFace ? enWord : ukWord,
+                            compact: false,
+                            mainStyle: TextStyle(
+                              color: darkTheme
+                                  ? Colors.white
+                                  : (showENFace
+                                      ? const Color(0xFF102A43)
+                                      : const Color(0xFF164C37)),
+                              fontFamily: 'Inter',
+                              fontWeight: FontWeight.w700,
+                              fontSize: showENFace ? 34 : 27,
+                              height: 1.1,
+                            ),
+                            secondary: showENFace
+                                ? (entry != null && entry.wordSyn.isNotEmpty
+                                    ? '(${entry.wordSyn})'
+                                    : '')
+                                : '',
+                            secondaryStyle: showENFace
+                                ? TextStyle(
+                                    color: darkTheme
+                                        ? Colors.white.withValues(alpha: 0.8)
+                                        : const Color(0xFF315B75),
+                                    fontFamily: 'Inter',
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w500,
+                                  )
+                                : TextStyle(
+                                    color: darkTheme
+                                        ? Colors.white.withValues(alpha: 0.8)
+                                        : const Color(0xFF215A47),
+                                    fontFamily: 'Inter',
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 22,
+                                  ),
                           ),
-                          secondary: showENFace
-                              ? (entry != null && entry.wordSyn.isNotEmpty ? '(${entry.wordSyn})' : '')
-                              : (entry != null && entry.trans2.isNotEmpty ? entry.trans2 : ''),
-                          secondaryStyle: showENFace
-                              ? TextStyle(
-                                  color: Colors.blueGrey.shade600,
-                                  fontFamily: 'Inter',
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w500,
-                                )
-                              : const TextStyle(
-                                  color: Color(0xFFB71C1C),
-                                  fontFamily: 'Inter',
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 22,
-                                ),
                         ),
                       ),
-                    ),
-                    Positioned(
-                      top: 12,
-                      right: 12,
-                      child: GestureDetector(
-                        onTap: () {
-                          if (entry != null) speakWord(entry.wordMain);
-                        },
-                        child: Container(
-                          width: 35,
-                          height: 38,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFE3F2FD),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Center(
+                      Positioned(
+                        top: 12,
+                        right: 12,
+                        child: GestureDetector(
+                          onTap: () {
+                            if (entry != null) speakWord(entry.wordMain);
+                          },
+                          child: _GlassIconSurface(
+                            size: 38,
+                            dark: darkTheme,
                             child: SvgPicture.asset(
                               'assets/icons/Speaker.svg',
                               width: 20,
                               height: 20,
+                              colorFilter: ColorFilter.mode(
+                                darkTheme
+                                    ? Colors.white.withValues(alpha: 0.92)
+                                    : const Color(0xFF25455F),
+                                BlendMode.srcIn,
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                  ],
+                      Positioned(
+                        bottom: 12,
+                        right: 12,
+                        child: GestureDetector(
+                          onTap: () {
+                            _playTapClick();
+                            if (currentSetWords.isNotEmpty) {
+                              _toggleUnwantedWord(
+                                  currentSetWords[currentIndex].wordMain);
+                            }
+                          },
+                          child: _GlassIconSurface(
+                            size: 38,
+                            dark: darkTheme,
+                            child: Icon(
+                              unwantedWords
+                                      .contains(enWord.trim().toLowerCase())
+                                  ? Icons.delete
+                                  : Icons.delete_outline,
+                              color: unwantedWords
+                                      .contains(enWord.trim().toLowerCase())
+                                  ? (darkTheme
+                                      ? Colors.redAccent.shade100
+                                      : Colors.red)
+                                  : (darkTheme
+                                      ? Colors.white.withValues(alpha: 0.92)
+                                      : const Color(0xFF25455F)),
+                              size: 22,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: singleCardGapHeight),
           // Always reserve space for examples, but only show for EN card
           SizedBox(
-            height: 38,
-            child: showENFace && (example1.isNotEmpty || example2.isNotEmpty)
-                ? Wrap(
-                    spacing: 8,
-                    alignment: WrapAlignment.center,
-                    children: [
-                      if (example1.isNotEmpty)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              vertical: 8.0, horizontal: 12.0),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFE8F5E9),
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Text(
-                            example1,
-                            style: const TextStyle(
-                              color: Color(0xFF2E7D32),
-                              fontFamily: 'Inter',
-                              fontWeight: FontWeight.w500,
-                              fontSize: 17, // +~20%
-                            ),
-                          ),
-                        ),
-                      if (example2.isNotEmpty)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              vertical: 8.0, horizontal: 12.0),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFE8F5E9),
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Text(
-                            example2,
-                            style: const TextStyle(
-                              color: Color(0xFF2E7D32),
-                              fontFamily: 'Inter',
-                              fontWeight: FontWeight.w500,
-                              fontSize: 17, // +~20%
-                            ),
-                          ),
-                        ),
-                    ],
+            height: singleCardExamplesHeight,
+            child: showENFace && cardExamples.isNotEmpty
+                ? Container(
+                    width: cardWidth,
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 8.0, horizontal: 14.0),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE8F5E9),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      cardExamples.join('\n'),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Color(0xFF2E7D32),
+                        fontFamily: 'Inter',
+                        fontWeight: FontWeight.w500,
+                        fontSize: 14,
+                        height: 1.2,
+                      ),
+                    ),
                   )
                 : null,
           ),
@@ -1366,102 +1761,115 @@ class _FlashcardScreenState extends State<FlashcardScreen>
             gridCardENFace[idx] = !gridCardENFace[idx];
           });
         },
-        child: Container(
-          constraints: BoxConstraints(minHeight: gridCardMinHeight),
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: isEN ? const Color(0xFFB3E5FC) : const Color(0xFFB2FFB2),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Stack(
-            children: [
-              Positioned(
-                top: 8,
-                left: 8,
-                child: GestureDetector(
-                  onTap: () {
-                    _playTapClick();
-                    // Check if we're in a custom list
-                    if (selectedLevel == 'custom') {
-                      _removeWordFromCustomList(entry);
-                    } else {
-                      _addWordToCustomSet(entry);
-                    }
-                  },
-                  child: Container(
-                    width: 28,
-                    height: 28,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFE3F2FD).withValues(alpha: 0.8),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Center(
+        child: _LiquidGlassSurface(
+          tint: isEN ? const Color(0xFF4FC3F7) : const Color(0xFF66BB6A),
+          dark: darkTheme,
+          child: Container(
+            constraints: BoxConstraints(minHeight: gridCardMinHeight),
+            padding: const EdgeInsets.all(8),
+            child: Stack(
+              children: [
+                Positioned(
+                  top: 8,
+                  left: 8,
+                  child: GestureDetector(
+                    onTap: () {
+                      _playTapClick();
+                      // Check if we're in a custom list
+                      if (selectedLevel == 'custom') {
+                        _removeWordFromCustomList(entry);
+                      } else {
+                        _addWordToCustomSet(entry);
+                      }
+                    },
+                    child: _GlassIconSurface(
+                      size: 28,
+                      dark: darkTheme,
                       child: Icon(
                         selectedLevel == 'custom'
                             ? Icons.delete_outline
                             : Icons.star_border,
                         color: selectedLevel == 'custom'
-                            ? Colors.blueGrey.shade400
-                            : Colors.blueGrey.shade600,
+                            ? (darkTheme
+                                ? Colors.redAccent.shade100
+                                : Colors.blueGrey.shade500)
+                            : (darkTheme
+                                ? Colors.white.withValues(alpha: 0.92)
+                                : const Color(0xFF25455F)),
                         size: 18,
                       ),
                     ),
                   ),
                 ),
-              ),
-              Center(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  child: centeredWordBlock(
-                    main: isEN ? entry.wordMain : entry.trans1,
-                    mainStyle: TextStyle(
-                      color: isEN ? Colors.black : const Color(0xFFB71C1C),
-                      fontFamily: 'Inter',
-                      fontWeight: FontWeight.w700,
-                      fontSize: 22, // +~20%
-                    ),
-                    secondary: isEN
-                        ? (entry.wordSyn.isNotEmpty ? '(${entry.wordSyn})' : '')
-                        : (entry.trans2.isNotEmpty ? entry.trans2 : ''),
-                    secondaryStyle: isEN
-                        ? TextStyle(
-                            color: Colors.blueGrey.shade700,
-                            fontFamily: 'Inter',
-                            fontStyle: FontStyle.italic,
-                            fontSize: 14,
-                          )
-                        : const TextStyle(
-                            color: Color(0xFFB71C1C),
-                            fontFamily: 'Inter',
-                            fontWeight: FontWeight.w600,
-                            fontSize: 18,
-                          ),
-                    examples: isEN ? [entry.example1, entry.example2] : const [],
-                    exampleStyle: const TextStyle(
-                      color: Color(0xFF2E7D32),
-                      fontFamily: 'Inter',
-                      fontWeight: FontWeight.w500,
-                      fontSize: 14, // +~20%
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: centeredWordBlock(
+                      main: isEN ? entry.wordMain : entry.trans1,
+                      compact: true,
+                      mainMaxLines: isEN ? 1 : 2,
+                      mainStyle: TextStyle(
+                        color: darkTheme
+                            ? Colors.white
+                            : (isEN
+                                ? const Color(0xFF102A43)
+                                : const Color(0xFF164C37)),
+                        fontFamily: 'Inter',
+                        fontWeight: FontWeight.w700,
+                        fontSize: 22, // +~20%
+                      ),
+                      secondary: isEN
+                          ? (entry.wordSyn.isNotEmpty
+                              ? '(${entry.wordSyn})'
+                              : '')
+                          : '',
+                      secondaryStyle: isEN
+                          ? TextStyle(
+                              color: darkTheme
+                                  ? Colors.white.withValues(alpha: 0.8)
+                                  : const Color(0xFF315B75),
+                              fontFamily: 'Inter',
+                              fontStyle: FontStyle.italic,
+                              fontSize: 14,
+                            )
+                          : TextStyle(
+                              color: darkTheme
+                                  ? Colors.white.withValues(alpha: 0.8)
+                                  : const Color(0xFF215A47),
+                              fontFamily: 'Inter',
+                              fontWeight: FontWeight.w600,
+                              fontSize: 18,
+                            ),
                     ),
                   ),
                 ),
-              ),
-              Positioned(
-                top: 8,
-                right: 8,
-                child: GestureDetector(
-                  onTap: () {
-                    _playTapClick();
-                    speakWord(entry.wordMain);
-                  },
-                  child: SvgPicture.asset(
-                    'assets/icons/Speaker.svg',
-                    width: 18,
-                    height: 18,
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: GestureDetector(
+                    onTap: () {
+                      _playTapClick();
+                      speakWord(entry.wordMain);
+                    },
+                    child: _GlassIconSurface(
+                      size: 28,
+                      dark: darkTheme,
+                      child: SvgPicture.asset(
+                        'assets/icons/Speaker.svg',
+                        width: 16,
+                        height: 16,
+                        colorFilter: ColorFilter.mode(
+                          darkTheme
+                              ? Colors.white.withValues(alpha: 0.92)
+                              : const Color(0xFF25455F),
+                          BlendMode.srcIn,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       );
@@ -1489,94 +1897,97 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     Widget buildGridView({required double availableHeight}) {
       return LayoutBuilder(
         builder: (context, constraints) {
-        final double maxWidth = constraints.maxWidth;
-        final double horizontalPadding =
-            math.max(12.0, math.min(32.0, maxWidth * 0.04));
-        final double availableWidth =
-            math.max(140.0, maxWidth - horizontalPadding * 2);
-        final double spacing =
-            math.max(10.0, math.min(20.0, availableWidth * 0.03));
-        final int startIndex = gridPage * _cardsPerGridPage;
-        final int totalRemaining =
-            math.max(0, currentSetWords.length - startIndex);
-        final int itemsOnPage = totalRemaining > _cardsPerGridPage
-            ? _cardsPerGridPage
-            : totalRemaining;
-        final double viewportHeight = availableHeight;
-        final double gridTopPadding = 0.0;
-        final double gridBottomPadding = 0.0;
-        final bool isLandscape = maxWidth >= viewportHeight;
-        final bool isTabletLayout =
-            math.min(maxWidth, viewportHeight) >= 600.0;
-        final bool forceTabletGrid =
-            isTabletLayout && itemsOnPage == _cardsPerGridPage;
-        int computedColumns = (availableWidth / 150).floor();
-        if (computedColumns < 2) {
-          computedColumns = 2;
-        } else if (computedColumns > 4) {
-          computedColumns = 4;
-        }
-        final int crossAxisCount =
-            forceTabletGrid ? (isLandscape ? 5 : 2) : computedColumns;
-        final double usableWidth =
-            availableWidth - spacing * (crossAxisCount - 1);
-        final double cardWidth = usableWidth / crossAxisCount;
-        final int rows = itemsOnPage == 0
-            ? 1
-            : forceTabletGrid
-                ? (isLandscape ? 2 : 5)
-                : ((itemsOnPage + crossAxisCount - 1) ~/ crossAxisCount);
-        final double availableHeightForCards = math.max(
-            160.0, viewportHeight - gridTopPadding - gridBottomPadding);
-        final double fittedCardHeight =
-            (availableHeightForCards - spacing * (rows - 1)) / rows;
-        final double cardHeight = forceTabletGrid
-            ? math.max(gridCardMinHeight, fittedCardHeight)
-            : math.max(
-                gridCardMinHeight, math.min(cardWidth * 0.78, fittedCardHeight));
-        final double aspectRatio = cardWidth / cardHeight;
-        final double gridContentHeight =
-            rows * cardHeight + math.max(0, rows - 1) * spacing;
-        final double extraVerticalPadding = math.max(
-          0.0,
-          (viewportHeight - gridContentHeight - gridTopPadding - gridBottomPadding) /
-              2,
-        );
+          final double maxWidth = constraints.maxWidth;
+          final double horizontalPadding =
+              math.max(12.0, math.min(32.0, maxWidth * 0.04));
+          final double availableWidth =
+              math.max(140.0, maxWidth - horizontalPadding * 2);
+          final double spacing =
+              math.max(10.0, math.min(20.0, availableWidth * 0.03));
+          final int startIndex = gridPage * _cardsPerGridPage;
+          final int totalRemaining =
+              math.max(0, currentSetWords.length - startIndex);
+          final int itemsOnPage = totalRemaining > _cardsPerGridPage
+              ? _cardsPerGridPage
+              : totalRemaining;
+          final double viewportHeight = availableHeight;
+          final double gridTopPadding = 0.0;
+          final double gridBottomPadding = 0.0;
+          final bool isLandscape = maxWidth >= viewportHeight;
+          final bool isTabletLayout =
+              math.min(maxWidth, viewportHeight) >= 600.0;
+          final bool forceTabletGrid =
+              isTabletLayout && itemsOnPage == _cardsPerGridPage;
+          int computedColumns = (availableWidth / 150).floor();
+          if (computedColumns < 2) {
+            computedColumns = 2;
+          } else if (computedColumns > 4) {
+            computedColumns = 4;
+          }
+          final int crossAxisCount =
+              forceTabletGrid ? (isLandscape ? 5 : 2) : computedColumns;
+          final double usableWidth =
+              availableWidth - spacing * (crossAxisCount - 1);
+          final double cardWidth = usableWidth / crossAxisCount;
+          final int rows = itemsOnPage == 0
+              ? 1
+              : forceTabletGrid
+                  ? (isLandscape ? 2 : 5)
+                  : ((itemsOnPage + crossAxisCount - 1) ~/ crossAxisCount);
+          final double availableHeightForCards = math.max(
+              160.0, viewportHeight - gridTopPadding - gridBottomPadding);
+          final double fittedCardHeight =
+              (availableHeightForCards - spacing * (rows - 1)) / rows;
+          final double cardHeight = forceTabletGrid
+              ? math.max(gridCardMinHeight, fittedCardHeight)
+              : math.max(gridCardMinHeight,
+                  math.min(cardWidth * 0.78, fittedCardHeight));
+          final double aspectRatio = cardWidth / cardHeight;
+          final double gridContentHeight =
+              rows * cardHeight + math.max(0, rows - 1) * spacing;
+          final double extraVerticalPadding = math.max(
+            0.0,
+            (viewportHeight -
+                    gridContentHeight -
+                    gridTopPadding -
+                    gridBottomPadding) /
+                2,
+          );
 
-        return GestureDetector(
-          onHorizontalDragEnd: (details) {
-            if (details.primaryVelocity != null) {
-              setState(() {
-                if (details.primaryVelocity! < 0) {
-                  nextGridPage();
-                } else if (details.primaryVelocity! > 0) {
-                  prevGridPage();
-                }
-                gridCardENFace = List.filled(_cardsPerGridPage, showENFace);
-              });
-            }
-          },
-          child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
-            child: GridView.builder(
-              padding: EdgeInsets.only(
-                bottom: gridBottomPadding + extraVerticalPadding,
-                top: gridTopPadding + extraVerticalPadding,
+          return GestureDetector(
+            onHorizontalDragEnd: (details) {
+              if (details.primaryVelocity != null) {
+                setState(() {
+                  if (details.primaryVelocity! < 0) {
+                    nextGridPage();
+                  } else if (details.primaryVelocity! > 0) {
+                    prevGridPage();
+                  }
+                  gridCardENFace = List.filled(_cardsPerGridPage, showENFace);
+                });
+              }
+            },
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+              child: GridView.builder(
+                padding: EdgeInsets.only(
+                  bottom: gridBottomPadding + extraVerticalPadding,
+                  top: gridTopPadding + extraVerticalPadding,
+                ),
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: itemsOnPage,
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: crossAxisCount,
+                  crossAxisSpacing: spacing,
+                  mainAxisSpacing: spacing,
+                  childAspectRatio: aspectRatio,
+                ),
+                itemBuilder: (context, i) =>
+                    gridCard(currentSetWords[startIndex + i], i),
               ),
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: itemsOnPage,
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: crossAxisCount,
-                crossAxisSpacing: spacing,
-                mainAxisSpacing: spacing,
-                childAspectRatio: aspectRatio,
-              ),
-              itemBuilder: (context, i) =>
-                  gridCard(currentSetWords[startIndex + i], i),
             ),
-          ),
-        );
+          );
         },
       );
     }
@@ -1715,6 +2126,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       top: overlayPanelTop + 8,
       left: 0,
       right: 0,
+      bottom: bottomBarHeight + bottomSafePadding + 12,
       child: IgnorePointer(
         ignoring: !showSettingsMenu,
         child: AnimatedOpacity(
@@ -1725,567 +2137,604 @@ class _FlashcardScreenState extends State<FlashcardScreen>
             offset: showSettingsMenu ? Offset.zero : const Offset(0, -0.05),
             duration: const Duration(milliseconds: 400),
             curve: Curves.easeOutCubic,
-            // --- WRAP THE CONTAINER WITH A STATEFULBUILDER ---
-            child: StatefulBuilder(
-              builder: (BuildContext context, StateSetter setMenuState) {
-            void togglePanel(String panel) {
-              setState(() {
-                activeSettingsPanel = activeSettingsPanel == panel ? '' : panel;
-              });
-              setMenuState(() {});
-            }
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: StatefulBuilder(
+                builder: (BuildContext context, StateSetter setMenuState) {
+                  void togglePanel(String panel) {
+                    setState(() {
+                      activeSettingsPanel =
+                          activeSettingsPanel == panel ? '' : panel;
+                    });
+                    setMenuState(() {});
+                  }
 
-            Color tileIconColor(bool enabled) {
-              if (enabled) return Colors.black;
-              return darkTheme ? Colors.white : Colors.black;
-            }
+                  Color tileIconColor(bool enabled) {
+                    if (enabled) return Colors.black;
+                    return darkTheme ? Colors.white : Colors.black;
+                  }
 
-            Widget settingsTile({
-              required Widget icon,
-              required String label,
-              String? subLabel,
-              required bool enabled,
-              required VoidCallback onTap,
-            }) {
-              final Color base = darkTheme ? const Color(0xFF263240) : Colors.white;
-              final Color active = const Color(0xFFD6ECFF);
-              final Color border = darkTheme
-                  ? Colors.white24
-                  : const Color(0xFF1A237E).withValues(alpha: 0.18);
-              final Color labelColor =
-                  enabled ? Colors.black : (darkTheme ? Colors.white : Colors.black87);
-              final Color subColor =
-                  enabled ? Colors.black54 : (darkTheme ? Colors.white60 : Colors.black54);
-              return GestureDetector(
-                onTap: () {
-                  _playTapClick();
-                  onTap();
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: enabled ? active : base,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: border),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.04),
-                        blurRadius: 6,
-                        offset: const Offset(0, 2),
+                  Widget settingsTile({
+                    required Widget icon,
+                    required String label,
+                    String? subLabel,
+                    required bool enabled,
+                    required VoidCallback onTap,
+                  }) {
+                    final Color base =
+                        darkTheme ? const Color(0xFF263240) : Colors.white;
+                    final Color active = const Color(0xFFD6ECFF);
+                    final Color border = darkTheme
+                        ? Colors.white24
+                        : const Color(0xFF1A237E).withValues(alpha: 0.18);
+                    final Color labelColor = enabled
+                        ? Colors.black
+                        : (darkTheme ? Colors.white : Colors.black87);
+                    final Color subColor = enabled
+                        ? Colors.black54
+                        : (darkTheme ? Colors.white60 : Colors.black54);
+                    return GestureDetector(
+                      onTap: () {
+                        _playTapClick();
+                        onTap();
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: enabled ? active : base,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: border),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.04),
+                              blurRadius: 6,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          children: [
+                            icon,
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    label,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: labelColor,
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                  if (subLabel != null)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 2),
+                                      child: Text(
+                                        subLabel,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: subColor,
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ],
-                  ),
-                  child: Row(
-                    children: [
-                      icon,
-                      const SizedBox(width: 10),
-                      Expanded(
+                    );
+                  }
+
+                  Widget settingsPanel() {
+                    const Color activePanelBorder = Color(0xFFB3E5FC);
+                    Color panelBorderColor(bool isActive) {
+                      if (isActive) return activePanelBorder;
+                      return darkTheme
+                          ? Colors.white24
+                          : const Color(0xFF1A237E).withValues(alpha: 0.18);
+                    }
+
+                    if (activeSettingsPanel == 'sleep') {
+                      return Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: darkTheme
+                              ? const Color(0xFF1F2B3B)
+                              : Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: panelBorderColor(
+                              sleepTimerEnd != null ||
+                                  activeSettingsPanel == 'sleep',
+                            ),
+                          ),
+                        ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             Text(
-                              label,
+                              _t('sleep_timer'),
                               style: TextStyle(
-                                color: labelColor,
+                                color:
+                                    darkTheme ? Colors.white70 : Colors.black87,
                                 fontWeight: FontWeight.w700,
                                 fontSize: 17,
                               ),
                             ),
-                            if (subLabel != null)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 2),
-                                child: Text(
-                                  subLabel,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: subColor,
-                                    fontSize: 13,
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    sleepTimerEnd == null
+                                        ? _t('off')
+                                        : _remainingSleepMinutesLabel(),
+                                    style: TextStyle(
+                                      color: darkTheme
+                                          ? Colors.white
+                                          : Colors.black,
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w600,
+                                    ),
                                   ),
                                 ),
-                              ),
+                                SizedBox(
+                                  width: 70,
+                                  child: TextField(
+                                    controller: sleepTimerController,
+                                    keyboardType: TextInputType.number,
+                                    inputFormatters: [
+                                      FilteringTextInputFormatter.digitsOnly
+                                    ],
+                                    cursorColor:
+                                        darkTheme ? Colors.white : Colors.black,
+                                    style: TextStyle(
+                                      color: darkTheme
+                                          ? Colors.white
+                                          : Colors.black87,
+                                      fontSize: 17,
+                                    ),
+                                    decoration: InputDecoration(
+                                      hintText: _t('min'),
+                                      hintStyle: TextStyle(
+                                        color: darkTheme
+                                            ? Colors.white70
+                                            : Colors.black45,
+                                        fontSize: 14,
+                                      ),
+                                      filled: true,
+                                      fillColor: darkTheme
+                                          ? const Color(0xFF2C3E50)
+                                          : const Color(0xFFF7F9FC),
+                                      isDense: true,
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 8,
+                                      ),
+                                      enabledBorder: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(10),
+                                        borderSide: BorderSide(
+                                          color: darkTheme
+                                              ? Colors.white30
+                                              : Colors.black26,
+                                        ),
+                                      ),
+                                      focusedBorder: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(10),
+                                        borderSide: BorderSide(
+                                          color: darkTheme
+                                              ? Colors.white70
+                                              : Colors.black54,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                IconButton(
+                                  onPressed: () {
+                                    final minutes = int.tryParse(
+                                      sleepTimerController.text.trim(),
+                                    );
+                                    if (minutes == null || minutes <= 0) {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        SnackBar(
+                                          content: Text(_t('enter_minutes')),
+                                        ),
+                                      );
+                                      return;
+                                    }
+                                    setState(() {
+                                      _startSleepTimer(
+                                          Duration(minutes: minutes));
+                                    });
+                                    setMenuState(() {});
+                                  },
+                                  icon: Icon(
+                                    Icons.play_arrow,
+                                    color:
+                                        darkTheme ? Colors.white : Colors.black,
+                                    size: 22,
+                                  ),
+                                ),
+                                IconButton(
+                                  onPressed: () {
+                                    setState(() => _cancelSleepTimer());
+                                    setMenuState(() {});
+                                  },
+                                  icon: Icon(
+                                    Icons.stop,
+                                    color:
+                                        darkTheme ? Colors.white : Colors.black,
+                                    size: 22,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    _t('repeat_list'),
+                                    style: TextStyle(
+                                      color: darkTheme
+                                          ? Colors.white70
+                                          : Colors.black87,
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                                Switch.adaptive(
+                                  value: sleepTimerLoop,
+                                  onChanged: (value) async {
+                                    _playTapClick();
+                                    final prefs =
+                                        await SharedPreferences.getInstance();
+                                    await prefs.setBool(
+                                        'sleepTimerLoop', value);
+                                    if (!mounted) return;
+                                    setState(() => sleepTimerLoop = value);
+                                    setMenuState(() {});
+                                  },
+                                  activeThumbColor:
+                                      darkTheme ? Colors.white : Colors.black,
+                                  activeTrackColor: const Color(0xFFB3E5FC),
+                                  inactiveThumbColor: darkTheme
+                                      ? Colors.white70
+                                      : Colors.black54,
+                                  inactiveTrackColor: darkTheme
+                                      ? Colors.white24
+                                      : const Color(0xFF1A237E)
+                                          .withValues(alpha: 0.18),
+                                ),
+                              ],
+                            ),
                           ],
                         ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            }
+                      );
+                    }
 
-            Widget settingsPanel() {
-              const Color activePanelBorder = Color(0xFFB3E5FC);
-              Color panelBorderColor(bool isActive) {
-                if (isActive) return activePanelBorder;
-                return darkTheme
-                    ? Colors.white24
-                    : const Color(0xFF1A237E).withValues(alpha: 0.18);
-              }
-
-              if (activeSettingsPanel == 'sleep') {
-                return Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: darkTheme ? const Color(0xFF1F2B3B) : Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: panelBorderColor(
-                        sleepTimerEnd != null || activeSettingsPanel == 'sleep',
-                      ),
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _t('sleep_timer'),
-                        style: TextStyle(
-                          color: darkTheme ? Colors.white70 : Colors.black87,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 17,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              sleepTimerEnd == null
-                                  ? _t('off')
-                                  : _remainingSleepMinutesLabel(),
-                              style: TextStyle(
-                                color: darkTheme ? Colors.white : Colors.black,
-                                fontSize: 18,
-                                fontWeight: FontWeight.w600,
-                              ),
+                    if (activeSettingsPanel == 'save') {
+                      return Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: darkTheme
+                              ? const Color(0xFF1F2B3B)
+                              : Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: panelBorderColor(
+                              targetCustomSet.isNotEmpty ||
+                                  activeSettingsPanel == 'save',
                             ),
                           ),
-                          SizedBox(
-                            width: 70,
-                            child: TextField(
-                              controller: sleepTimerController,
-                              keyboardType: TextInputType.number,
-                              inputFormatters: [
-                                FilteringTextInputFormatter.digitsOnly
-                              ],
-                              cursorColor:
-                                  darkTheme ? Colors.white : Colors.black,
+                        ),
+                        child: _buildSaveToSection(darkTheme, setMenuState),
+                      );
+                    }
+
+                    if (activeSettingsPanel == 'legal') {
+                      return Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: darkTheme
+                              ? const Color(0xFF1F2B3B)
+                              : Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: panelBorderColor(
+                                activeSettingsPanel == 'legal'),
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _t('legal'),
                               style: TextStyle(
                                 color:
-                                    darkTheme ? Colors.white : Colors.black87,
-                                fontSize: 17,
-                              ),
-                              decoration: InputDecoration(
-                                hintText: _t('min'),
-                                hintStyle: TextStyle(
-                                  color: darkTheme
-                                      ? Colors.white70
-                                      : Colors.black45,
-                                  fontSize: 14,
-                                ),
-                                filled: true,
-                                fillColor: darkTheme
-                                    ? const Color(0xFF2C3E50)
-                                    : const Color(0xFFF7F9FC),
-                                isDense: true,
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 8,
-                                ),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                  borderSide: BorderSide(
-                                    color: darkTheme
-                                        ? Colors.white30
-                                        : Colors.black26,
-                                  ),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                  borderSide: BorderSide(
-                                    color: darkTheme
-                                        ? Colors.white70
-                                        : Colors.black54,
-                                  ),
-                                ),
+                                    darkTheme ? Colors.white70 : Colors.black54,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.6,
                               ),
                             ),
-                          ),
-                          const SizedBox(width: 8),
-                          IconButton(
-                            onPressed: () {
-                              final minutes = int.tryParse(
-                                sleepTimerController.text.trim(),
-                              );
-                              if (minutes == null || minutes <= 0) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(_t('enter_minutes')),
-                                  ),
-                                );
-                                return;
-                              }
-                              setState(() {
-                                _startSleepTimer(Duration(minutes: minutes));
-                              });
-                              setMenuState(() {});
-                            },
-                            icon: Icon(
-                              Icons.play_arrow,
-                              color: darkTheme ? Colors.white : Colors.black,
-                              size: 22,
-                            ),
-                          ),
-                          IconButton(
-                            onPressed: () {
-                              setState(() => _cancelSleepTimer());
-                              setMenuState(() {});
-                            },
-                            icon: Icon(
-                              Icons.stop,
-                              color: darkTheme ? Colors.white : Colors.black,
-                              size: 22,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              _t('repeat_list'),
-                              style: TextStyle(
-                                color: darkTheme ? Colors.white70 : Colors.black87,
-                                fontSize: 17,
-                                fontWeight: FontWeight.w600,
+                            const SizedBox(height: 10),
+                            _settingsRow(
+                              icon: Icon(
+                                Icons.privacy_tip_outlined,
+                                size: 32,
+                                color:
+                                    darkTheme ? Colors.white60 : Colors.black38,
                               ),
+                              label: _t('privacy_policy'),
+                              value: false,
+                              onChanged: (_) =>
+                                  _openLegalUrl(_privacyPolicyUrl),
+                              darkTheme: darkTheme,
+                              isButton: true,
+                              labelColor:
+                                  darkTheme ? Colors.white60 : Colors.black38,
+                              chevronColor:
+                                  darkTheme ? Colors.white60 : Colors.black38,
                             ),
-                          ),
-                          Switch.adaptive(
-                            value: sleepTimerLoop,
-                            onChanged: (value) async {
-                              _playTapClick();
-                              final prefs = await SharedPreferences.getInstance();
-                              await prefs.setBool('sleepTimerLoop', value);
-                              if (!mounted) return;
-                              setState(() => sleepTimerLoop = value);
-                              setMenuState(() {});
-                            },
-                            activeThumbColor:
-                                darkTheme ? Colors.white : Colors.black,
-                            activeTrackColor: const Color(0xFFB3E5FC),
-                            inactiveThumbColor:
-                                darkTheme ? Colors.white70 : Colors.black54,
-                            inactiveTrackColor: darkTheme
-                                ? Colors.white24
-                                : const Color(0xFF1A237E).withValues(alpha: 0.18),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                );
-              }
-
-              if (activeSettingsPanel == 'save') {
-                return Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: darkTheme ? const Color(0xFF1F2B3B) : Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: panelBorderColor(
-                        targetCustomSet.isNotEmpty || activeSettingsPanel == 'save',
-                      ),
-                    ),
-                  ),
-                  child: _buildSaveToSection(darkTheme, setMenuState),
-                );
-              }
-
-              if (activeSettingsPanel == 'legal') {
-                return Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: darkTheme ? const Color(0xFF1F2B3B) : Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: panelBorderColor(activeSettingsPanel == 'legal'),
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _t('legal'),
-                        style: TextStyle(
-                          color: darkTheme ? Colors.white70 : Colors.black54,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.6,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      _settingsRow(
-                        icon: Icon(
-                          Icons.privacy_tip_outlined,
-                          size: 32,
-                          color: darkTheme ? Colors.white60 : Colors.black38,
-                        ),
-                        label: _t('privacy_policy'),
-                        value: false,
-                        onChanged: (_) => _openLegalUrl(_privacyPolicyUrl),
-                        darkTheme: darkTheme,
-                        isButton: true,
-                        labelColor: darkTheme ? Colors.white60 : Colors.black38,
-                        chevronColor: darkTheme ? Colors.white60 : Colors.black38,
-                      ),
-                      const SizedBox(height: 10),
-                      _settingsRow(
-                        icon: Icon(
-                          Icons.description_outlined,
-                          size: 32,
-                          color: darkTheme ? Colors.white60 : Colors.black38,
-                        ),
-                        label: _t('terms_of_use'),
-                        value: false,
-                        onChanged: (_) => _openLegalUrl(_termsUrl),
-                        darkTheme: darkTheme,
-                        isButton: true,
-                        labelColor: darkTheme ? Colors.white60 : Colors.black38,
-                        chevronColor: darkTheme ? Colors.white60 : Colors.black38,
-                      ),
-                    ],
-                  ),
-                );
-              }
-
-              return const SizedBox.shrink();
-            }
-
-            return GestureDetector(
-              onVerticalDragEnd: (details) {
-                final v = details.primaryVelocity ?? 0.0;
-                if (v < -500) {
-                  setState(() => showSettingsMenu = false);
-                }
-              },
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Container(
-                    width: settingsWidth,
-                    padding: const EdgeInsets.fromLTRB(34, 18, 34, 18),
-                    decoration: BoxDecoration(
-                      color: darkTheme ? const Color(0xFF2C3E50) : Colors.white,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.08),
-                          blurRadius: 8,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                      borderRadius: const BorderRadius.only(
-                        topLeft: Radius.circular(18),
-                        topRight: Radius.circular(18),
-                      ),
-                      border: Border(
-                        bottom: BorderSide(
-                          color: const Color(0xFF1A237E),
-                          width: 8,
-                        ),
-                      ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const SizedBox(height: 6),
-                        _settingsLanguageRow(
-                    studyCode: studyLang,
-                    nativeCode: nativeLang,
-                    onStudyChanged: (code) async {
-                      final prefs = await SharedPreferences.getInstance();
-                      await prefs.setString('study_language', code);
-                      setState(() => studyLang = code);
-                      loadWords();
-                    },
-                    onNativeChanged: (code) async {
-                      final prefs = await SharedPreferences.getInstance();
-                      await prefs.setString('native_language', code);
-                      setState(() => nativeLang = code);
-                      loadWords();
-                    },
-                    darkTheme: darkTheme,
-                  ),
-                  const Divider(),
-                  const SizedBox(height: 12),
-                  LayoutBuilder(
-                    builder: (context, constraints) {
-                      final double tileAspect =
-                          constraints.maxWidth > 520 ? 3.0 : 2.6;
-                      return GridView.count(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        crossAxisCount: 2,
-                        crossAxisSpacing: 12,
-                        mainAxisSpacing: 12,
-                        childAspectRatio: tileAspect,
-                        children: [
-                          settingsTile(
-                            icon: Icon(
-                              Icons.play_arrow,
-                              size: 26,
-                              color: tileIconColor(randomSpeaking),
-                            ),
-                            label: _t('random_speaking'),
-                            enabled: randomSpeaking,
-                            onTap: () {
-                              setState(() => randomSpeaking = !randomSpeaking);
-                              setMenuState(() {});
-                            },
-                          ),
-                          settingsTile(
-                            icon: Icon(
-                              Icons.bedtime_outlined,
-                              size: 26,
-                              color: tileIconColor(sleepTimerEnd != null ||
-                                  activeSettingsPanel == 'sleep'),
-                            ),
-                            label: _t('sleep_timer'),
-                            subLabel: sleepTimerEnd == null
-                                ? _t('off')
-                                : _remainingSleepMinutesLabel(),
-                            enabled: sleepTimerEnd != null ||
-                                activeSettingsPanel == 'sleep',
-                            onTap: () => togglePanel('sleep'),
-                          ),
-                          settingsTile(
-                            icon: SvgPicture.asset(
-                              'assets/icons/darkTheme.svg',
-                              width: 26,
-                              height: 26,
-                              colorFilter: ColorFilter.mode(
-                                tileIconColor(darkTheme),
-                                BlendMode.srcIn,
+                            const SizedBox(height: 10),
+                            _settingsRow(
+                              icon: Icon(
+                                Icons.description_outlined,
+                                size: 32,
+                                color:
+                                    darkTheme ? Colors.white60 : Colors.black38,
                               ),
+                              label: _t('terms_of_use'),
+                              value: false,
+                              onChanged: (_) => _openLegalUrl(_termsUrl),
+                              darkTheme: darkTheme,
+                              isButton: true,
+                              labelColor:
+                                  darkTheme ? Colors.white60 : Colors.black38,
+                              chevronColor:
+                                  darkTheme ? Colors.white60 : Colors.black38,
                             ),
-                            label: _t('dark_theme'),
-                            enabled: darkTheme,
-                            onTap: () {
-                              setState(() => darkTheme = !darkTheme);
-                              setMenuState(() {});
-                            },
-                          ),
-                          settingsTile(
-                            icon: Icon(
-                              Icons.translate,
-                              size: 26,
-                              color: tileIconColor(uiUseNative),
-                            ),
-                            label: _t('interface_language'),
-                            subLabel: uiUseNative
-                                ? '${_t('native')}: ${_languageLabel[nativeLang] ?? nativeLang}'
-                                : _languageLabel['en'] ?? 'English',
-                            enabled: uiUseNative,
-                            onTap: () async {
-                              final prefs = await SharedPreferences.getInstance();
-                              final v = !uiUseNative;
-                              await prefs.setBool('uiUseNative', v);
-                              if (!mounted) return;
-                              setState(() => uiUseNative = v);
-                              setMenuState(() {});
-                            },
-                          ),
-                          settingsTile(
-                            icon: Icon(
-                              Icons.edit_note,
-                              size: 26,
-                              color: tileIconColor(targetCustomSet.isNotEmpty ||
-                                  activeSettingsPanel == 'save'),
-                            ),
-                            label: _t('save_to_list'),
-                            subLabel: targetCustomSet.isEmpty
-                                ? _t('none')
-                                : targetCustomSet,
-                            enabled: targetCustomSet.isNotEmpty ||
-                                activeSettingsPanel == 'save',
-                            onTap: () => togglePanel('save'),
-                          ),
-                          settingsTile(
-                            icon: Icon(
-                              Icons.privacy_tip_outlined,
-                              size: 26,
-                              color: tileIconColor(activeSettingsPanel == 'legal'),
-                            ),
-                            label: _t('legal'),
-                            subLabel: '${_t('privacy_policy')} & ${_t('terms_of_use')}',
-                            enabled: activeSettingsPanel == 'legal',
-                            onTap: () => togglePanel('legal'),
-                          ),
-                        ],
+                          ],
+                        ),
                       );
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 200),
-                    child: settingsPanel(),
-                  ),
-                  const SizedBox(height: 10),
-                  const SizedBox(height: 10),
-                      ],
-                    ),
-                  ),
-                  Positioned(
-                    top: -12,
-                    left: 0,
-                    right: 0,
-                    child: Center(
-                      child: Container(
-                        width: 150,
-                        height: 20,
-                        decoration: BoxDecoration(
-                          color:
-                              darkTheme ? const Color(0xFF2C3E50) : Colors.white,
-                          borderRadius: BorderRadius.circular(999),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.08),
-                              blurRadius: 6,
-                              offset: const Offset(0, 3),
+                    }
+
+                    return const SizedBox.shrink();
+                  }
+
+                  return LayoutBuilder(
+                    builder: (context, constraints) => GestureDetector(
+                      onVerticalDragEnd: (details) {
+                        final v = details.primaryVelocity ?? 0.0;
+                        if (v < -500) {
+                          setState(() => showSettingsMenu = false);
+                        }
+                      },
+                      child: SizedBox(
+                        width: settingsWidth,
+                        height: constraints.maxHeight,
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.fromLTRB(34, 18, 34, 18),
+                          decoration: BoxDecoration(
+                            color: darkTheme
+                                ? const Color(0xFF2C3E50)
+                                : Colors.white,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.08),
+                                blurRadius: 8,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(
+                              color: const Color(0xFF1F6F78)
+                                  .withValues(alpha: 0.24),
                             ),
-                          ],
+                          ),
+                          child: SingleChildScrollView(
+                            physics: const BouncingScrollPhysics(),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const SizedBox(height: 6),
+                                _settingsLanguageRow(
+                                  studyCode: studyLang,
+                                  nativeCode: nativeLang,
+                                  onStudyChanged: (code) async {
+                                    final prefs =
+                                        await SharedPreferences.getInstance();
+                                    await prefs.setString(
+                                        'study_language', code);
+                                    setState(() => studyLang = code);
+                                    loadWords();
+                                  },
+                                  onNativeChanged: (code) async {
+                                    final prefs =
+                                        await SharedPreferences.getInstance();
+                                    await prefs.setString(
+                                        'native_language', code);
+                                    setState(() => nativeLang = code);
+                                    loadWords();
+                                  },
+                                  darkTheme: darkTheme,
+                                ),
+                                const Divider(),
+                                const SizedBox(height: 12),
+                                LayoutBuilder(
+                                  builder: (context, constraints) {
+                                    const tileHeight = 62.0;
+                                    final tileWidth =
+                                        (constraints.maxWidth - 12.0) / 2.0;
+                                    final tileAspect = tileWidth / tileHeight;
+                                    return GridView.count(
+                                      shrinkWrap: true,
+                                      physics:
+                                          const NeverScrollableScrollPhysics(),
+                                      crossAxisCount: 2,
+                                      crossAxisSpacing: 12,
+                                      mainAxisSpacing: 12,
+                                      childAspectRatio: tileAspect,
+                                      children: [
+                                        settingsTile(
+                                          icon: Icon(
+                                            Icons.play_arrow,
+                                            size: 26,
+                                            color:
+                                                tileIconColor(randomSpeaking),
+                                          ),
+                                          label: _t('random_speaking'),
+                                          enabled: randomSpeaking,
+                                          onTap: () {
+                                            setState(() => randomSpeaking =
+                                                !randomSpeaking);
+                                            setMenuState(() {});
+                                          },
+                                        ),
+                                        settingsTile(
+                                          icon: Icon(
+                                            Icons.bedtime_outlined,
+                                            size: 26,
+                                            color: tileIconColor(
+                                                sleepTimerEnd != null ||
+                                                    activeSettingsPanel ==
+                                                        'sleep'),
+                                          ),
+                                          label: _t('sleep_timer'),
+                                          subLabel: sleepTimerEnd == null
+                                              ? _t('off')
+                                              : _remainingSleepMinutesLabel(),
+                                          enabled: sleepTimerEnd != null ||
+                                              activeSettingsPanel == 'sleep',
+                                          onTap: () => togglePanel('sleep'),
+                                        ),
+                                        settingsTile(
+                                          icon: SvgPicture.asset(
+                                            'assets/icons/darkTheme.svg',
+                                            width: 26,
+                                            height: 26,
+                                            colorFilter: ColorFilter.mode(
+                                              tileIconColor(darkTheme),
+                                              BlendMode.srcIn,
+                                            ),
+                                          ),
+                                          label: _t('dark_theme'),
+                                          enabled: darkTheme,
+                                          onTap: () {
+                                            setState(
+                                                () => darkTheme = !darkTheme);
+                                            setMenuState(() {});
+                                          },
+                                        ),
+                                        settingsTile(
+                                          icon: Icon(
+                                            Icons.translate,
+                                            size: 26,
+                                            color: tileIconColor(uiUseNative),
+                                          ),
+                                          label: _t('interface_language'),
+                                          subLabel: uiUseNative
+                                              ? '${_t('native')}: ${LanguageCatalog.byCode(nativeLang).label}'
+                                              : LanguageCatalog.byCode('en')
+                                                  .label,
+                                          enabled: uiUseNative,
+                                          onTap: () async {
+                                            final prefs =
+                                                await SharedPreferences
+                                                    .getInstance();
+                                            final v = !uiUseNative;
+                                            await prefs.setBool(
+                                                'uiUseNative', v);
+                                            if (!mounted) return;
+                                            setState(() => uiUseNative = v);
+                                            setMenuState(() {});
+                                          },
+                                        ),
+                                        settingsTile(
+                                          icon: Icon(
+                                            Icons.edit_note,
+                                            size: 26,
+                                            color: tileIconColor(targetCustomSet
+                                                    .isNotEmpty ||
+                                                activeSettingsPanel == 'save'),
+                                          ),
+                                          label: _t('save_to_list'),
+                                          subLabel: targetCustomSet.isEmpty
+                                              ? _t('none')
+                                              : targetCustomSet,
+                                          enabled: targetCustomSet.isNotEmpty ||
+                                              activeSettingsPanel == 'save',
+                                          onTap: () => togglePanel('save'),
+                                        ),
+                                        settingsTile(
+                                          icon: Icon(
+                                            Icons.privacy_tip_outlined,
+                                            size: 26,
+                                            color: tileIconColor(
+                                                activeSettingsPanel == 'legal'),
+                                          ),
+                                          label: _t('legal'),
+                                          subLabel:
+                                              '${_t('privacy_policy')} & ${_t('terms_of_use')}',
+                                          enabled:
+                                              activeSettingsPanel == 'legal',
+                                          onTap: () => togglePanel('legal'),
+                                        ),
+                                        settingsTile(
+                                          icon: Icon(
+                                            Icons.delete_sweep_outlined,
+                                            size: 26,
+                                            color: tileIconColor(
+                                                unwantedWords.isNotEmpty),
+                                          ),
+                                          label:
+                                              '\u041D\u0435\u043F\u043E\u0442\u0440\u0456\u0431\u043D\u0456 \u0441\u043B\u043E\u0432\u0430',
+                                          subLabel: unwantedWords.isEmpty
+                                              ? '\u0441\u043F\u0438\u0441\u043E\u043A \u043F\u043E\u0440\u043E\u0436\u043D\u0456\u0439'
+                                              : '${unwantedWords.length} \u0441\u043B\u0456\u0432',
+                                          enabled: unwantedWords.isNotEmpty,
+                                          onTap: () {
+                                            setState(
+                                                () => showSettingsMenu = false);
+                                            _showUnwantedWordsDialog();
+                                          },
+                                        ),
+                                      ],
+                                    );
+                                  },
+                                ),
+                                const SizedBox(height: 12),
+                                AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 200),
+                                  child: settingsPanel(),
+                                ),
+                                const SizedBox(height: 10),
+                                const SizedBox(height: 10),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  Positioned(
-                    bottom: -12,
-                    left: 0,
-                    right: 0,
-                    child: Center(
-                      child: Container(
-                        width: 150,
-                        height: 20,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF1A237E),
-                          borderRadius: BorderRadius.circular(999),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.12),
-                              blurRadius: 10,
-                              offset: const Offset(0, 5),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+                  );
+                },
               ),
-            );
-              },
             ),
           ),
         ),
@@ -2310,439 +2759,502 @@ class _FlashcardScreenState extends State<FlashcardScreen>
           backgroundColor: darkTheme ? const Color(0xFF1E2A3A) : Colors.white,
           // [MODIFIED] Removed SafeArea wrapper to allow edge-to-edge content
           body: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            // --- LAYER 1: CONTENT (SCROLLABLE GRID/CARD) ---
-            Positioned.fill(
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final contentPadding = EdgeInsets.only(
-                    top: appBarTotalHeight + 12.0,
-                    bottom: bottomBarHeight + bottomSafePadding + 16.0,
-                  );
-                  final contentMinHeight = math.max(
-                    0.0,
-                    constraints.maxHeight -
-                        contentPadding.top -
-                        contentPadding.bottom,
-                  );
+            clipBehavior: Clip.none,
+            children: [
+              // --- LAYER 1: CONTENT (SCROLLABLE GRID/CARD) ---
+              Positioned.fill(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final contentPadding = EdgeInsets.only(
+                      top: appBarTotalHeight + 12.0,
+                      bottom: bottomBarHeight + bottomSafePadding + 16.0,
+                    );
+                    final contentMinHeight = math.max(
+                      0.0,
+                      constraints.maxHeight -
+                          contentPadding.top -
+                          contentPadding.bottom,
+                    );
 
-                  if (gridMode) {
-                    return Padding(
+                    if (gridMode) {
+                      return Padding(
+                        padding: contentPadding,
+                        child: ConstrainedBox(
+                          constraints:
+                              BoxConstraints(minHeight: contentMinHeight),
+                          child: Center(
+                            child: buildGridView(
+                                availableHeight: contentMinHeight),
+                          ),
+                        ),
+                      );
+                    }
+
+                    return SingleChildScrollView(
                       padding: contentPadding,
                       child: ConstrainedBox(
-                        constraints: BoxConstraints(minHeight: contentMinHeight),
+                        constraints:
+                            BoxConstraints(minHeight: contentMinHeight),
                         child: Center(
-                          child: buildGridView(availableHeight: contentMinHeight),
+                          child: GestureDetector(
+                            onHorizontalDragEnd: (details) {
+                              if (details.primaryVelocity != null) {
+                                if (details.primaryVelocity! < 0) {
+                                  setState(() {
+                                    if (currentSetWords.isNotEmpty) {
+                                      if (currentIndex + 1 ==
+                                          currentSetWords.length) {
+                                        if (!BillingService().isPremium) {
+                                          AdHelper.showInterstitialAd(
+                                              onAdClosed: () {});
+                                        }
+                                      }
+                                      currentIndex = (currentIndex + 1) %
+                                          currentSetWords.length;
+                                    }
+                                    showENFace = widget.showENasDefault;
+                                  });
+                                } else if (details.primaryVelocity! > 0) {
+                                  setState(() {
+                                    if (currentSetWords.isNotEmpty) {
+                                      currentIndex = (currentIndex -
+                                              1 +
+                                              currentSetWords.length) %
+                                          currentSetWords.length;
+                                    }
+                                    showENFace = widget.showENasDefault;
+                                  });
+                                }
+                              }
+                            },
+                            child: singleCardView,
+                          ),
                         ),
                       ),
                     );
-                  }
-
-                  return SingleChildScrollView(
-                    padding: contentPadding,
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(minHeight: contentMinHeight),
-                      child: Center(
-                        child: GestureDetector(
-                          onHorizontalDragEnd: (details) {
-                            if (details.primaryVelocity != null) {
-                              if (details.primaryVelocity! < 0) {
-                                setState(() {
-                                  if (currentSetWords.isNotEmpty) {
-                                    currentIndex = (currentIndex + 1) %
-                                        currentSetWords.length;
-                                  }
-                                  showENFace = widget.showENasDefault;
-                                });
-                              } else if (details.primaryVelocity! > 0) {
-                                setState(() {
-                                  if (currentSetWords.isNotEmpty) {
-                                    currentIndex = (currentIndex -
-                                            1 +
-                                            currentSetWords.length) %
-                                        currentSetWords.length;
-                                  }
-                                  showENFace = widget.showENasDefault;
-                                });
-                              }
-                            }
-                          },
-                          child: singleCardView,
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-
-            // --- LAYER 2: TOP BAR (PINNED) ---
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: Container(
-                width: double.infinity,
-                height: appBarTotalHeight,
-                decoration: const BoxDecoration(
-                  color: Color(0xFF1A237E),
+                  },
                 ),
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(20, topSafePadding + 18, 20, 16),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          gridMode
-                          ? '${_t('cards')} ${currentSetWords.isEmpty ? 0 : (gridPage * _cardsPerGridPage + 1)} / ${currentSetWords.length}'
-                          : '${_t('cards')} ${currentSetWords.isEmpty ? 0 : (currentIndex + 1)} / ${currentSetWords.length}',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontFamily: 'Inter',
-                            fontWeight: FontWeight.w600,
-                            fontSize: 18,
-                            letterSpacing: 0.3,
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: Center(
-                          child: sleepTimerEnd == null
-                              ? const SizedBox.shrink()
-                              : Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(
-                                      Icons.timer_outlined,
-                                      size: 16,
-                                      color: Colors.white,
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      _remainingSleepMinutesLabel(),
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontFamily: 'Inter',
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 18,
-                                        letterSpacing: 0.3,
+              ),
+
+              // --- LAYER 2: TOP BAR (PINNED) ---
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: SizedBox(
+                  width: double.infinity,
+                  height: appBarTotalHeight,
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(12, topSafePadding + 8, 12, 8),
+                    child: _LiquidGlassSurface(
+                      tint: const Color(0xFF1F6F78),
+                      dark: true,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                gridMode
+                                    ? '${_t('cards')} ${currentSetWords.isEmpty ? 0 : (gridPage * _cardsPerGridPage + 1)} / ${currentSetWords.length}'
+                                    : '${_t('cards')} ${currentSetWords.isEmpty ? 0 : (currentIndex + 1)} / ${currentSetWords.length}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontFamily: 'Inter',
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 17,
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: Center(
+                                child: sleepTimerEnd == null
+                                    ? const SizedBox.shrink()
+                                    : Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(
+                                            Icons.timer_outlined,
+                                            size: 16,
+                                            color: Colors.white,
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            _remainingSleepMinutesLabel(),
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontFamily: 'Inter',
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 16,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                              ),
+                            ),
+                            Tooltip(
+                              message: 'Reader',
+                              child: GestureDetector(
+                                onTap: () async {
+                                  _playTapClick();
+                                  await Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (context) => ReaderScreen(
+                                        darkTheme: darkTheme,
+                                        studyLang: studyLang,
+                                        nativeLang: nativeLang,
                                       ),
                                     ),
-                                  ],
+                                  );
+                                  await loadWords();
+                                },
+                                child: const _GlassIconSurface(
+                                  size: 44,
+                                  dark: true,
+                                  child: Icon(
+                                    Icons.menu_book_rounded,
+                                    size: 24,
+                                    color: Colors.white,
+                                  ),
                                 ),
-                        ),
-                      ),
-                      GestureDetector(
-                        onTap: () {
-                          setState(() {
-                            showSettingsMenu = !showSettingsMenu;
-                          });
-                        },
-                        child: Container(
-                          height: 44,
-                          width: 44,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Center(
-                            child: SvgPicture.asset(
-                              'assets/icons/settings.svg',
-                              width: 26,
-                              height: 26,
-                              colorFilter: const ColorFilter.mode(
-                                  Colors.white, BlendMode.srcIn),
+                              ),
                             ),
-                          ),
+                            const SizedBox(width: 10),
+                            Tooltip(
+                              message: 'Settings',
+                              child: GestureDetector(
+                                onTap: () {
+                                  setState(() {
+                                    showSettingsMenu = !showSettingsMenu;
+                                  });
+                                },
+                                child: _GlassIconSurface(
+                                  size: 44,
+                                  dark: true,
+                                  child: SvgPicture.asset(
+                                    'assets/icons/settings.svg',
+                                    width: 24,
+                                    height: 24,
+                                    colorFilter: const ColorFilter.mode(
+                                      Colors.white,
+                                      BlendMode.srcIn,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            _WordsMenuButton(
+                              groupedLists: groupedLists,
+                              currentLevel: selectedLevel,
+                              currentSublist: selectedSublist,
+                              setLabel: _t('set'),
+                              selectListLabel: _t('select_list'),
+                              dark: true,
+                              onOpen: () {
+                                setState(() {
+                                  panelActiveLevel = selectedLevel.isNotEmpty
+                                      ? selectedLevel
+                                      : (groupedLists.keys.isNotEmpty
+                                          ? groupedLists.keys.first
+                                          : '');
+                                  showWordsMenu = !showWordsMenu;
+                                  showSettingsMenu = false;
+                                });
+                              },
+                              onSelect: (level, sublist) {
+                                setState(() {
+                                  selectedLevel = level;
+                                  selectedSublist = sublist;
+                                  filterCurrentSet();
+                                  showWordsMenu = false;
+                                });
+                              },
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      _WordsMenuButton(
-                        groupedLists: getGroupedLists(),
-                        currentLevel: selectedLevel,
-                        currentSublist: selectedSublist,
-                        setLabel: _t('set'),
-                        selectListLabel: _t('select_list'),
-                        onOpen: () {
-                          setState(() {
-                            panelActiveLevel = selectedLevel.isNotEmpty
-                                ? selectedLevel
-                                : (getGroupedLists().keys.isNotEmpty
-                                    ? getGroupedLists().keys.first
-                                    : '');
-                            showWordsMenu = !showWordsMenu;
-                            showSettingsMenu = false;
-                          });
-                        },
-                        onSelect: (level, sublist) {
-                          setState(() {
-                            selectedLevel = level;
-                            selectedSublist = sublist;
-                            filterCurrentSet();
-                            showWordsMenu = false;
-                          });
-                        },
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ),
-            ),
 
-            // --- LAYER 3: BOTTOM BAR (PINNED) ---
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: Container(
-                width: double.infinity,
-                // [MODIFIED] Height includes safe area
-                height: bottomBarHeight + bottomSafePadding,
-                // [MODIFIED] Padding for safe area
-                padding: EdgeInsets.only(
-                    left: 24,
-                    right: 24,
-                    bottom: bottomSafePadding > 0 ? bottomSafePadding : 0),
-                decoration: BoxDecoration(
-                  color: darkTheme ? const Color(0xFF1A237E) : Colors.white,
-                  borderRadius:
-                      const BorderRadius.vertical(top: Radius.circular(30)),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.08),
-                      blurRadius: 20,
-                      offset: const Offset(0, -6),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Expanded(
-                      child: bottomAction(
-                        onTap: () {
-                          setState(() {
-                            gridMode = !gridMode;
-                          });
-                        },
-                        child: SvgPicture.asset(
-                          'assets/icons/Grid.svg',
-                          width: 32,
-                          height: 32,
-                          colorFilter: darkTheme
-                              ? const ColorFilter.mode(
-                                  Colors.white, BlendMode.srcIn)
-                              : null,
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      child: bottomAction(
-                        onTap: () {
-                          widget.onToggleDefault();
-                          setState(() {
-                            showENFace = !showENFace;
-                            gridCardENFace =
-                                List.filled(_cardsPerGridPage, showENFace);
-                          });
-                        },
-                        child: Container(
-                          width: 48,
-                          height: 36,
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: darkTheme
-                                ? const Color(0xFF263240)
-                                : const Color(0xFFF1F3F8),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            showENFace ? studyLang.toUpperCase() : nativeLang.toUpperCase(),
-                            strutStyle: const StrutStyle(
-                              forceStrutHeight: true,
-                              height: 1.0,
+              // --- LAYER 3: BOTTOM BAR (PINNED) ---
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: SizedBox(
+                  width: double.infinity,
+                  height: bottomBarHeight + bottomSafePadding,
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                        left: 12,
+                        right: 12,
+                        top: 6,
+                        bottom:
+                            bottomSafePadding > 0 ? bottomSafePadding + 6 : 6),
+                    child: _LiquidGlassSurface(
+                      tint: const Color(0xFF1F6F78),
+                      dark: true,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Expanded(
+                            child: Tooltip(
+                              message: 'Cards grid',
+                              child: bottomAction(
+                                onTap: () {
+                                  setState(() {
+                                    gridMode = !gridMode;
+                                  });
+                                },
+                                child: _GlassIconSurface(
+                                  size: 42,
+                                  dark: true,
+                                  child: SvgPicture.asset(
+                                    'assets/icons/Grid.svg',
+                                    width: 24,
+                                    height: 24,
+                                    colorFilter: const ColorFilter.mode(
+                                      Colors.white,
+                                      BlendMode.srcIn,
+                                    ),
+                                  ),
+                                ),
+                              ),
                             ),
-                            style: TextStyle(
-                              color: darkTheme
-                                  ? Colors.white
-                                  : const Color(0xFF1A237E),
-                              fontFamily: 'Inter',
-                              fontWeight: FontWeight.w700,
-                              fontSize: 16,
-                              height: 1.0,
-                            ),
-                            textAlign: TextAlign.center,
                           ),
-                        ),
+                          Expanded(
+                            child: Tooltip(
+                              message: 'Card language',
+                              child: bottomAction(
+                                onTap: () {
+                                  widget.onToggleDefault();
+                                  setState(() {
+                                    showENFace = !showENFace;
+                                    gridCardENFace = List.filled(
+                                      _cardsPerGridPage,
+                                      showENFace,
+                                    );
+                                  });
+                                },
+                                child: Container(
+                                  width: 50,
+                                  height: 36,
+                                  alignment: Alignment.center,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.14),
+                                    borderRadius: BorderRadius.circular(18),
+                                    border: Border.all(
+                                      color:
+                                          Colors.white.withValues(alpha: 0.36),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    showENFace
+                                        ? studyLang.toUpperCase()
+                                        : nativeLang.toUpperCase(),
+                                    strutStyle: const StrutStyle(
+                                      forceStrutHeight: true,
+                                      height: 1.0,
+                                    ),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontFamily: 'Inter',
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 15,
+                                      height: 1.0,
+                                    ),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: Tooltip(
+                              message: isPlaying ? 'Stop playback' : 'Play set',
+                              child: bottomAction(
+                                onTap: () {
+                                  if (!isPlaying) {
+                                    playSetWords();
+                                  } else {
+                                    stopPlaying();
+                                  }
+                                },
+                                child: _GlassIconSurface(
+                                  size: 42,
+                                  dark: true,
+                                  child: SvgPicture.asset(
+                                    'assets/icons/Play circle.svg',
+                                    width: 25,
+                                    height: 25,
+                                    colorFilter: ColorFilter.mode(
+                                      isPlaying
+                                          ? Colors.greenAccent.shade100
+                                          : Colors.white,
+                                      BlendMode.srcIn,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: Tooltip(
+                              message: 'Jump to card',
+                              child: bottomAction(
+                                onTap: () {
+                                  if (currentSetWords.isNotEmpty) {
+                                    setState(() {
+                                      showSlider = !showSlider;
+                                      sliderValue = gridMode
+                                          ? gridPage.toDouble()
+                                          : currentIndex.toDouble();
+                                    });
+                                  }
+                                },
+                                child: _GlassIconSurface(
+                                  size: 42,
+                                  dark: true,
+                                  child: SvgPicture.asset(
+                                    'assets/icons/Chevrons right.svg',
+                                    width: 25,
+                                    height: 25,
+                                    colorFilter: const ColorFilter.mode(
+                                      Colors.white,
+                                      BlendMode.srcIn,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    Expanded(
-                      child: bottomAction(
-                        onTap: () {
-                          if (!isPlaying) {
-                            playSetWords();
-                          } else {
-                            stopPlaying();
-                          }
-                        },
-                        child: SvgPicture.asset(
-                          'assets/icons/Play circle.svg',
-                          width: 32,
-                          height: 32,
-                          colorFilter: isPlaying
-                              ? const ColorFilter.mode(
-                                  Colors.green, BlendMode.srcIn)
-                              : (darkTheme
-                                  ? const ColorFilter.mode(
-                                      Colors.white, BlendMode.srcIn)
-                                  : null),
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      child: bottomAction(
-                        onTap: () {
-                          if (currentSetWords.isNotEmpty) {
-                            setState(() {
-                              showSlider = !showSlider;
-                              sliderValue = gridMode
-                                  ? gridPage.toDouble()
-                                  : currentIndex.toDouble();
-                            });
-                          }
-                        },
-                        child: SvgPicture.asset(
-                          'assets/icons/Chevrons right.svg',
-                          width: 32,
-                          height: 32,
-                          colorFilter: darkTheme
-                              ? const ColorFilter.mode(
-                                  Colors.white, BlendMode.srcIn)
-                              : null,
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
-            ),
 
-          // --- LAYER 4: SLIDER OVERLAY ---
-          if (showSlider && sliderSection is! SizedBox) ...[
-            // Tap anywhere (outside bottom bar/slider) to dismiss.
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: bottomBarHeight + bottomSafePadding,
-              child: GestureDetector(
-                behavior: HitTestBehavior.translucent,
-                onTap: () => setState(() => showSlider = false),
-                child: const SizedBox.expand(),
-              ),
-            ),
-            Positioned(
-              left: 0,
-              right: 0,
-              // [MODIFIED] Position above the taller bottom bar
-              bottom: bottomBarHeight + bottomSafePadding + 12,
-              child: IgnorePointer(
-                ignoring: false,
-                child: sliderSection,
-              ),
-            ),
-          ],
-
-          // --- LAYER 5: MENUS ---
-          // Words Menu Panel (and its backdrop)
-          Positioned.fill(
-            child: IgnorePointer(
-              ignoring: !showWordsMenu,
-              child: AnimatedOpacity(
-                opacity: showWordsMenu ? 1 : 0,
-                duration: const Duration(milliseconds: 400),
-                curve: Curves.easeOutCubic,
-                child: GestureDetector(
-                  onTap: () => setState(() => showWordsMenu = false),
-                  child: Container(color: Colors.black.withValues(alpha: 0.1)),
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            top: overlayPanelTop,
-            right: 20,
-            child: IgnorePointer(
-              ignoring: !showWordsMenu,
-              child: AnimatedOpacity(
-                opacity: showWordsMenu ? 1 : 0,
-                duration: const Duration(milliseconds: 400),
-                curve: Curves.easeOutCubic,
-                child: AnimatedSlide(
-                  offset: showWordsMenu ? Offset.zero : const Offset(0, -0.05),
-                  duration: const Duration(milliseconds: 400),
-                  curve: Curves.easeOutCubic,
+              // --- LAYER 4: SLIDER OVERLAY ---
+              if (showSlider && sliderSection is! SizedBox) ...[
+                // Tap anywhere (outside bottom bar/slider) to dismiss.
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: bottomBarHeight + bottomSafePadding,
                   child: GestureDetector(
-                    onVerticalDragEnd: (details) {
-                      final v = details.primaryVelocity ?? 0.0;
-                      if (v < -500) {
-                        setState(() => showWordsMenu = false);
-                      }
-                    },
-                    child: _WordsMenuPanel(
-                      groupedLists: getGroupedLists(),
-                      activeLevel: panelActiveLevel,
-                      currentLevel: selectedLevel,
-                      currentSublist: selectedSublist,
-                      levelLabel: _t('level'),
-                      listLabel: _t('list'),
-                      onChangeLevel: (lvl) =>
-                          setState(() => panelActiveLevel = lvl),
-                      onSelect: (level, sublist) {
-                        setState(() {
-                          selectedLevel = level;
-                          selectedSublist = sublist;
-                          filterCurrentSet();
-                          showWordsMenu = false;
-                        });
-                      },
+                    behavior: HitTestBehavior.translucent,
+                    onTap: () => setState(() => showSlider = false),
+                    child: const SizedBox.expand(),
+                  ),
+                ),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  // [MODIFIED] Position above the taller bottom bar
+                  bottom: bottomBarHeight + bottomSafePadding + 12,
+                  child: IgnorePointer(
+                    ignoring: false,
+                    child: sliderSection,
+                  ),
+                ),
+              ],
+
+              // --- LAYER 5: MENUS ---
+              // Words Menu Panel (and its backdrop)
+              Positioned.fill(
+                child: IgnorePointer(
+                  ignoring: !showWordsMenu,
+                  child: AnimatedOpacity(
+                    opacity: showWordsMenu ? 1 : 0,
+                    duration: const Duration(milliseconds: 400),
+                    curve: Curves.easeOutCubic,
+                    child: GestureDetector(
+                      onTap: () => setState(() => showWordsMenu = false),
+                      child:
+                          Container(color: Colors.black.withValues(alpha: 0.1)),
                     ),
                   ),
                 ),
               ),
-            ),
-          ),
-
-          // Settings Menu (and its backdrop)
-          Positioned.fill(
-            child: IgnorePointer(
-              ignoring: !showSettingsMenu,
-              child: AnimatedOpacity(
-                opacity: showSettingsMenu ? 1 : 0,
-                duration: const Duration(milliseconds: 400),
-                curve: Curves.easeOutCubic,
-                child: GestureDetector(
-                  onTap: () => setState(() => showSettingsMenu = false),
-                  child: Container(
-                    color: Colors.transparent,
-                  ), // Catches taps outside the menu
+              Positioned(
+                top: overlayPanelTop,
+                right: 20,
+                child: IgnorePointer(
+                  ignoring: !showWordsMenu,
+                  child: AnimatedOpacity(
+                    opacity: showWordsMenu ? 1 : 0,
+                    duration: const Duration(milliseconds: 400),
+                    curve: Curves.easeOutCubic,
+                    child: AnimatedSlide(
+                      offset:
+                          showWordsMenu ? Offset.zero : const Offset(0, -0.05),
+                      duration: const Duration(milliseconds: 400),
+                      curve: Curves.easeOutCubic,
+                      child: GestureDetector(
+                        onVerticalDragEnd: (details) {
+                          final v = details.primaryVelocity ?? 0.0;
+                          if (v < -500) {
+                            setState(() => showWordsMenu = false);
+                          }
+                        },
+                        child: _WordsMenuPanel(
+                          groupedLists: groupedLists,
+                          activeLevel: panelActiveLevel,
+                          currentLevel: selectedLevel,
+                          currentSublist: selectedSublist,
+                          levelLabel: _t('level'),
+                          listLabel: _t('list'),
+                          onChangeLevel: (lvl) =>
+                              setState(() => panelActiveLevel = lvl),
+                          onSelect: (level, sublist) {
+                            setState(() {
+                              selectedLevel = level;
+                              selectedSublist = sublist;
+                              filterCurrentSet();
+                              showWordsMenu = false;
+                            });
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
               ),
-            ),
+
+              // Settings Menu (and its backdrop)
+              Positioned.fill(
+                child: IgnorePointer(
+                  ignoring: !showSettingsMenu,
+                  child: AnimatedOpacity(
+                    opacity: showSettingsMenu ? 1 : 0,
+                    duration: const Duration(milliseconds: 400),
+                    curve: Curves.easeOutCubic,
+                    child: GestureDetector(
+                      onTap: () => setState(() => showSettingsMenu = false),
+                      child: Container(
+                        color: Colors.transparent,
+                      ), // Catches taps outside the menu
+                    ),
+                  ),
+                ),
+              ),
+              // The settingsMenu variable is already a Positioned widget
+              settingsMenu,
+            ],
           ),
-          // The settingsMenu variable is already a Positioned widget
-          settingsMenu,
-        ],
-      ),
-    ),
+        ),
       ),
     );
   }
 
   int _levelOrderIndex(String level) {
-    final order = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'custom'];
+    final order = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'SALES', 'CUSTOM'];
     final idx = order.indexOf(level.toUpperCase());
     return idx == -1 ? 1000 : idx;
   }
@@ -2765,13 +3277,16 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     setState(() {
       _customEntries.removeWhere((entry) =>
           entry.sublist == selectedSublist &&
-          entry.wordMain.trim().toLowerCase() == word.wordMain.trim().toLowerCase());
-      
+          entry.wordMain.trim().toLowerCase() ==
+              word.wordMain.trim().toLowerCase());
+
       allWords.removeWhere((entry) =>
           entry.level == 'custom' &&
           entry.sublist == selectedSublist &&
-          entry.wordMain.trim().toLowerCase() == word.wordMain.trim().toLowerCase());
-          
+          entry.wordMain.trim().toLowerCase() ==
+              word.wordMain.trim().toLowerCase());
+      _invalidateGroupedLists();
+
       filterCurrentSet();
     });
 
@@ -2805,7 +3320,8 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     // Check if the word already exists in the target custom list (using cache)
     if (_customEntries.any((entry) =>
         entry.sublist == targetCustomSet &&
-        entry.wordMain.trim().toLowerCase() == word.wordMain.trim().toLowerCase())) {
+        entry.wordMain.trim().toLowerCase() ==
+            word.wordMain.trim().toLowerCase())) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -2834,12 +3350,13 @@ class _FlashcardScreenState extends State<FlashcardScreen>
 
     // Update in-memory cache and allWords list
     _customEntries.add(newEntry);
-    
+
     // Save to persistent storage in background
     _saveCustomListEntries(_customEntries);
 
     setState(() {
       allWords.add(newEntry);
+      _invalidateGroupedLists();
       // If the user is currently viewing the list they just saved to, refresh it.
       if (selectedLevel == 'custom' && selectedSublist == targetCustomSet) {
         filterCurrentSet();
@@ -2881,19 +3398,12 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     required ValueChanged<String> onNativeChanged,
     required bool darkTheme,
   }) {
-    const options = <Map<String, String>>[
-      {'code': 'en', 'label': 'English', 'native': 'English', 'flag': '\u{1F1FA}\u{1F1F8}'},
-      {'code': 'de', 'label': 'German', 'native': 'Deutsch', 'flag': '\u{1F1E9}\u{1F1EA}'},
-      {'code': 'es', 'label': 'Spanish', 'native': 'Espa\u00F1ol', 'flag': '\u{1F1EA}\u{1F1F8}'},
-      {'code': 'fr', 'label': 'French', 'native': 'Fran\u00E7ais', 'flag': '\u{1F1EB}\u{1F1F7}'},
-      {'code': 'it', 'label': 'Italian', 'native': 'Italiano', 'flag': '\u{1F1EE}\u{1F1F9}'},
-      {'code': 'pt', 'label': 'Portuguese', 'native': 'Portugu\u00EAs', 'flag': '\u{1F1F5}\u{1F1F9}'},
-      {'code': 'tr', 'label': 'Turkish', 'native': 'T\u00FCrk\u00E7e', 'flag': '\u{1F1F9}\u{1F1F7}'},
-      {'code': 'uk', 'label': 'Ukrainian', 'native': '\u0423\u043A\u0440\u0430\u0457\u043D\u0441\u044C\u043A\u0430', 'flag': '\u{1F1FA}\u{1F1E6}'},
-    ];
+    final options = LanguageCatalog.available;
 
-    Map<String, String> byCode(String code) =>
-        options.firstWhere((o) => o['code'] == code, orElse: () => options.first);
+    AppLanguage byCode(String code) => options.firstWhere(
+          (language) => language.code == code,
+          orElse: () => options.first,
+        );
 
     final titleStyle = TextStyle(
       color: darkTheme ? Colors.white70 : Colors.black54,
@@ -2933,7 +3443,8 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                   width: 44,
                   height: 5,
                   decoration: BoxDecoration(
-                    color: (darkTheme ? Colors.white : Colors.black).withValues(alpha: 0.15),
+                    color: (darkTheme ? Colors.white : Colors.black)
+                        .withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(99),
                   ),
                 ),
@@ -2951,7 +3462,8 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                   height: maxHeight,
                   child: GridView.builder(
                     padding: const EdgeInsets.only(bottom: 24),
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: 2,
                       crossAxisSpacing: 10,
                       mainAxisSpacing: 10,
@@ -2960,8 +3472,8 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                     itemCount: options.length,
                     itemBuilder: (context, index) {
                       final o = options[index];
-                      final bool selected = o['code'] == currentCode;
-                      final bool disabled = o['code'] == disabledCode;
+                      final bool selected = o.code == currentCode;
+                      final bool disabled = o.code == disabledCode;
                       final Color activeColor = isStudy
                           ? const Color(0xFFB3E5FC)
                           : const Color(0xFFB2FFB2);
@@ -2976,7 +3488,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                             : () {
                                 _playTapClick();
                                 Navigator.of(ctx).pop();
-                                onPick(o['code']!);
+                                onPick(o.code);
                               },
                         child: Container(
                           padding: const EdgeInsets.symmetric(
@@ -2990,7 +3502,8 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                           ),
                           child: Row(
                             children: [
-                              Text(o['flag']!, style: const TextStyle(fontSize: 22)),
+                              Text(o.flag,
+                                  style: const TextStyle(fontSize: 22)),
                               const SizedBox(width: 10),
                               Expanded(
                                 child: Column(
@@ -2998,7 +3511,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     Text(
-                                      o['label']!,
+                                      o.label,
                                       style: TextStyle(
                                         color: selected
                                             ? Colors.black
@@ -3011,7 +3524,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                                     ),
                                     const SizedBox(height: 2),
                                     Text(
-                                      o['native']!,
+                                      o.nativeLabel,
                                       style: TextStyle(
                                         color: selected
                                             ? Colors.black54
@@ -3072,7 +3585,8 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                 );
               },
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
                   color: bg,
                   borderRadius: BorderRadius.circular(14),
@@ -3081,22 +3595,24 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Row(
-                      children: [
-                        Text(o['flag']!, style: const TextStyle(fontSize: 18)),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            o['label']!,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: textColor,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 19,
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Text(o.flag, style: const TextStyle(fontSize: 18)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              o.label,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: textColor,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 19,
+                              ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                     Icon(
                       Icons.keyboard_arrow_down,
@@ -3199,8 +3715,8 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     );
   }
 
-
-  static const String _privacyPolicyUrl = 'https://volary.mrcs-global.com/privacy.html';
+  static const String _privacyPolicyUrl =
+      'https://volary.mrcs-global.com/privacy.html';
   static const String _termsUrl = 'https://volary.mrcs-global.com/terms.html';
 
   Future<void> _openLegalUrl(String url) async {
@@ -3488,6 +4004,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       // Update in-memory cache
       _customEntries.addAll(newEntries);
       allWords.addAll(newEntries);
+      _invalidateGroupedLists();
 
       // Save to persistent storage in background
       _saveCustomListEntries(_customEntries);
@@ -3497,7 +4014,8 @@ class _FlashcardScreenState extends State<FlashcardScreen>
 
       // Show success message with statistics
       int translatedCount = newEntries
-          .where((e) => e.trans1 != _translationNeeded && e.trans1 != e.wordMain)
+          .where(
+              (e) => e.trans1 != _translationNeeded && e.trans1 != e.wordMain)
           .length;
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -3517,6 +4035,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       setState(() {
         if (!allCustomListNames.contains(formattedListName)) {
           allCustomListNames.add(formattedListName);
+          _invalidateGroupedLists();
         }
       });
       if (setAsTarget) {
@@ -3571,8 +4090,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       builder: (BuildContext context) {
         return AlertDialog(
           title: Text(_t('delete_list')),
-          content: Text(
-              _t('delete_confirm').replaceAll('{list}', listName)),
+          content: Text(_t('delete_confirm').replaceAll('{list}', listName)),
           actions: <Widget>[
             TextButton(
               child: Text(_t('cancel')),
@@ -3581,7 +4099,8 @@ class _FlashcardScreenState extends State<FlashcardScreen>
               },
             ),
             TextButton(
-              child: Text(_t('delete'), style: const TextStyle(color: Colors.red)),
+              child:
+                  Text(_t('delete'), style: const TextStyle(color: Colors.red)),
               onPressed: () async {
                 Navigator.of(context).pop();
                 await _deleteCustomList(listName);
@@ -3592,6 +4111,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       },
     );
   }
+
   Future<void> _deleteCustomList(String listName) async {
     // 1. Remove from names list in SharedPreferences
     final prefs = await SharedPreferences.getInstance();
@@ -3601,12 +4121,15 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     allCustomListNames = customListNames;
 
     // 2. Filter the cached words
-    _customEntries = _customEntries.where((entry) => entry.sublist != listName).toList();
-    allWords.removeWhere((entry) => entry.level == 'custom' && entry.sublist == listName);
+    _customEntries =
+        _customEntries.where((entry) => entry.sublist != listName).toList();
+    allWords.removeWhere(
+        (entry) => entry.level == 'custom' && entry.sublist == listName);
+    _invalidateGroupedLists();
 
     // 3. Save updated words list in background
     _saveCustomListEntries(_customEntries);
-    
+
     // 4. Update UI: Select another list if the current one was deleted
     if (selectedLevel == 'custom' && selectedSublist == listName) {
       final grouped = getGroupedLists();
@@ -3626,7 +4149,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       });
     } else {
       setState(() {
-         filterCurrentSet();
+        filterCurrentSet();
       });
     }
   }
@@ -3716,6 +4239,9 @@ class _FlashcardScreenState extends State<FlashcardScreen>
   }
 
   Map<String, List<String>> getGroupedLists() {
+    final cached = _groupedListsCache;
+    if (cached != null) return cached;
+
     final Map<String, List<String>> grouped = {};
     for (var w in allWords) {
       grouped.putIfAbsent(w.level, () => []);
@@ -3745,15 +4271,22 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       grouped['custom']!.sort(_compareSublists);
     }
 
-    return grouped;
+    _groupedListsCache = Map.unmodifiable(
+      grouped.map(
+        (key, value) => MapEntry(key, List<String>.unmodifiable(value)),
+      ),
+    );
+    return _groupedListsCache!;
   }
 }
+
 class _WordsMenuButton extends StatelessWidget {
   final Map<String, List<String>> groupedLists;
   final String currentLevel;
   final String currentSublist;
   final String setLabel;
   final String selectListLabel;
+  final bool dark;
   final VoidCallback onOpen;
   final void Function(String level, String sublist) onSelect;
 
@@ -3763,6 +4296,7 @@ class _WordsMenuButton extends StatelessWidget {
     required this.currentSublist,
     required this.setLabel,
     required this.selectListLabel,
+    required this.dark,
     required this.onOpen,
     required this.onSelect,
   });
@@ -3792,51 +4326,42 @@ class _WordsMenuButton extends StatelessWidget {
       }
     }
 
-    final accentColor = const Color(0xFF1A237E);
-
     return GestureDetector(
       onTap: onOpen,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(18),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.08),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  setLabel,
-                  style: TextStyle(
-                    color: Colors.blueGrey.shade500,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
+      child: _LiquidGlassSurface(
+        tint: const Color(0xFF1F6F78),
+        dark: dark,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    setLabel,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.72),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                ),
-                Text(
-                  buttonLabel,
-                  style: TextStyle(
-                    color: accentColor,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 16,
+                  Text(
+                    buttonLabel,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                    ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(width: 10),
-            Icon(Icons.keyboard_arrow_down, color: accentColor),
-          ],
+                ],
+              ),
+              const SizedBox(width: 8),
+              const Icon(Icons.keyboard_arrow_down, color: Colors.white),
+            ],
+          ),
         ),
       ),
     );
@@ -3878,7 +4403,7 @@ class _WordsMenuPanelState extends State<_WordsMenuPanel> {
   }
 
   int _levelOrderIndex(String level) {
-    final order = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'custom'];
+    final order = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'SALES', 'CUSTOM'];
     final idx = order.indexOf(level.toUpperCase());
     return idx == -1 ? 1000 : idx;
   }
@@ -3910,29 +4435,29 @@ class _WordsMenuPanelState extends State<_WordsMenuPanel> {
     return a.toLowerCase().compareTo(b.toLowerCase());
   }
 
-    String _fmtSub(String s) {
-      final combinedMatch =
-          RegExp(r'^([A-Za-z]+\d*)L(\d+)$', caseSensitive: false)
-              .firstMatch(s.trim());
-      if (combinedMatch != null) {
-        return 'L${combinedMatch.group(2)}';
-      }
-      final n = _extractListNumber(s);
-      if (n != null) return 'L$n';
-
-      // Handle custom lists like 'list_custom_my_favorites' -> 'My Favorites'
-      if (s.startsWith('list_custom_')) {
-        return s
-            .substring(12)
-            .replaceAll('_', ' ')
-            .split(' ')
-            .map((word) => word.isNotEmpty
-                ? '${word[0].toUpperCase()}${word.substring(1)}'
-                : '')
-            .join(' ');
-      }
-      return s;
+  String _fmtSub(String s) {
+    final combinedMatch =
+        RegExp(r'^([A-Za-z]+\d*)L(\d+)$', caseSensitive: false)
+            .firstMatch(s.trim());
+    if (combinedMatch != null) {
+      return 'L${combinedMatch.group(2)}';
     }
+    final n = _extractListNumber(s);
+    if (n != null) return 'L$n';
+
+    // Handle custom lists like 'list_custom_my_favorites' -> 'My Favorites'
+    if (s.startsWith('list_custom_')) {
+      return s
+          .substring(12)
+          .replaceAll('_', ' ')
+          .split(' ')
+          .map((word) => word.isNotEmpty
+              ? '${word[0].toUpperCase()}${word.substring(1)}'
+              : '')
+          .join(' ');
+    }
+    return s;
+  }
 
   @override
   Widget build(BuildContext context) {

@@ -5,14 +5,15 @@ import 'package:flutter/services.dart'
     show HapticFeedback, SystemSound, SystemSoundType, SystemUiOverlayStyle;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/language_catalog.dart';
 import '../utils/system_ui.dart';
-import 'home_splash.dart';
 
 class LanguageSelectionScreen extends StatefulWidget {
   const LanguageSelectionScreen({super.key});
 
   @override
-  State<LanguageSelectionScreen> createState() => _LanguageSelectionScreenState();
+  State<LanguageSelectionScreen> createState() =>
+      _LanguageSelectionScreenState();
 }
 
 class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
@@ -36,7 +37,7 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
       Feedback.forTap(context);
     } catch (_) {}
     try {
-      SystemSound.play(SystemSoundType.click);
+      SystemSound.play(SystemSoundType.alert);
     } catch (_) {}
     try {
       HapticFeedback.selectionClick();
@@ -58,15 +59,13 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
 
   void _selectNative(String lang) async {
     setState(() => nativeLang = lang);
-    
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('study_language', studyLang!);
     await prefs.setString('native_language', lang);
-    
+
     if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const HomeSplashPage()),
-    );
+    Navigator.of(context).pushReplacementNamed('/flashcards');
   }
 
   Future<void> _flashAndSelect(String lang, {required bool native}) async {
@@ -100,217 +99,84 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
       child: Scaffold(
         backgroundColor: Colors.white,
         body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 260),
-        switchInCurve: Curves.easeOut,
-        switchOutCurve: Curves.easeIn,
-        transitionBuilder: (child, animation) {
-          final blur = Tween<double>(begin: 6.0, end: 0.0).animate(animation);
-          final fade = Tween<double>(begin: 0.4, end: 1.0).animate(animation);
-          return FadeTransition(
-            opacity: fade,
-            child: AnimatedBuilder(
-              animation: blur,
-              builder: (context, _) => ImageFiltered(
-                imageFilter: ImageFilter.blur(
-                  sigmaX: blur.value,
-                  sigmaY: blur.value,
+          duration: const Duration(milliseconds: 260),
+          switchInCurve: Curves.easeOut,
+          switchOutCurve: Curves.easeIn,
+          transitionBuilder: (child, animation) {
+            final blur = Tween<double>(begin: 6.0, end: 0.0).animate(animation);
+            final fade = Tween<double>(begin: 0.4, end: 1.0).animate(animation);
+            return FadeTransition(
+              opacity: fade,
+              child: AnimatedBuilder(
+                animation: blur,
+                builder: (context, _) => ImageFiltered(
+                  imageFilter: ImageFilter.blur(
+                    sigmaX: blur.value,
+                    sigmaY: blur.value,
+                  ),
+                  child: child,
                 ),
-                child: child,
               ),
-            ),
-          );
-        },
-        child: KeyedSubtree(
-          key: ValueKey(pickingNative),
-          child: Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.only(bottom: 24.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 40),
-                    _TitlePill(
-                      text: pickingNative
-                          ? 'Your native language?'
-                          : 'What language to learn?',
-                      backgroundColor: pickingNative
-                          ? const Color(0xFFB2FFB2) // active green
-                          : const Color(0xFFB3E5FC), // active blue
-                    ),
-                    const SizedBox(height: 48),
-
-                    // ENGLISH (only if not picking native English while study is English)
-                    if (!pickingNative || studyLang != 'en')
-                      _LanguageButton(
-                        flag: '\u{1F1FA}\u{1F1F8}',
-                        label: 'English',
-                        subLabel: pickingNative ? 'English' : 'Study English',
-                        color: pickingNative ? baseNative : baseStudy,
-                        pressedColor:
-                            pickingNative ? pressedNative : pressedStudy,
-                        isPressed:
-                            pressedLang == 'en' && pressedIsNative == pickingNative,
-                        onTap: () => _flashAndSelect(
-                          'en',
-                          native: pickingNative,
-                        ),
+            );
+          },
+          child: KeyedSubtree(
+            key: ValueKey(pickingNative),
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.only(bottom: 24.0),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 40),
+                      _TitlePill(
+                        text: pickingNative
+                            ? 'Your native language?'
+                            : 'What language to learn?',
+                        backgroundColor: pickingNative
+                            ? const Color(0xFFB2FFB2) // active green
+                            : const Color(0xFFB3E5FC), // active blue
                       ),
-                    if (!pickingNative || studyLang != 'en')
-                      const SizedBox(height: 12),
-
-                    // GERMAN
-                    if (!pickingNative || studyLang != 'de')
-                      _LanguageButton(
-                        flag: '\u{1F1E9}\u{1F1EA}',
-                        label: 'German',
-                        subLabel: pickingNative ? 'Deutsch' : 'Study German',
-                        color: pickingNative ? baseNative : baseStudy,
-                        pressedColor:
-                            pickingNative ? pressedNative : pressedStudy,
-                        isPressed:
-                            pressedLang == 'de' && pressedIsNative == pickingNative,
-                        onTap: () => _flashAndSelect(
-                          'de',
-                          native: pickingNative,
-                        ),
-                      ),
-                    if (!pickingNative || studyLang != 'de')
-                      const SizedBox(height: 12),
-
-                    // FRENCH
-                    if (!pickingNative || studyLang != 'fr')
-                      _LanguageButton(
-                        flag: '\u{1F1EB}\u{1F1F7}',
-                        label: 'French',
-                        subLabel: pickingNative ? 'Fran\u00E7ais' : 'Study French',
-                        color: pickingNative ? baseNative : baseStudy,
-                        pressedColor:
-                            pickingNative ? pressedNative : pressedStudy,
-                        isPressed:
-                            pressedLang == 'fr' && pressedIsNative == pickingNative,
-                        onTap: () => _flashAndSelect(
-                          'fr',
-                          native: pickingNative,
-                        ),
-                      ),
-                    if (!pickingNative || studyLang != 'fr')
-                      const SizedBox(height: 12),
-
-                    // ITALIAN
-                    if (!pickingNative || studyLang != 'it')
-                      _LanguageButton(
-                        flag: '\u{1F1EE}\u{1F1F9}',
-                        label: 'Italian',
-                        subLabel: pickingNative ? 'Italiano' : 'Study Italian',
-                        color: pickingNative ? baseNative : baseStudy,
-                        pressedColor:
-                            pickingNative ? pressedNative : pressedStudy,
-                        isPressed:
-                            pressedLang == 'it' && pressedIsNative == pickingNative,
-                        onTap: () => _flashAndSelect(
-                          'it',
-                          native: pickingNative,
-                        ),
-                      ),
-                    if (!pickingNative || studyLang != 'it')
-                      const SizedBox(height: 12),
-
-                    // SPANISH
-                    if (!pickingNative || studyLang != 'es')
-                      _LanguageButton(
-                        flag: '\u{1F1EA}\u{1F1F8}',
-                        label: 'Spanish',
-                        subLabel: pickingNative ? 'Espa\u00F1ol' : 'Study Spanish',
-                        color: pickingNative ? baseNative : baseStudy,
-                        pressedColor:
-                            pickingNative ? pressedNative : pressedStudy,
-                        isPressed:
-                            pressedLang == 'es' && pressedIsNative == pickingNative,
-                        onTap: () => _flashAndSelect(
-                          'es',
-                          native: pickingNative,
-                        ),
-                      ),
-                    if (!pickingNative || studyLang != 'es')
-                      const SizedBox(height: 12),
-
-                    // PORTUGUESE
-                    if (!pickingNative || studyLang != 'pt')
-                      _LanguageButton(
-                        flag: '\u{1F1F5}\u{1F1F9}',
-                        label: 'Portuguese',
-                        subLabel: pickingNative ? 'Portugu\u00EAs' : 'Study Portuguese',
-                        color: pickingNative ? baseNative : baseStudy,
-                        pressedColor:
-                            pickingNative ? pressedNative : pressedStudy,
-                        isPressed:
-                            pressedLang == 'pt' && pressedIsNative == pickingNative,
-                        onTap: () => _flashAndSelect(
-                          'pt',
-                          native: pickingNative,
-                        ),
-                      ),
-                    if (!pickingNative || studyLang != 'pt')
-                      const SizedBox(height: 12),
-
-                    // TURKISH
-                    if (!pickingNative || studyLang != 'tr')
-                      _LanguageButton(
-                        flag: '\u{1F1F9}\u{1F1F7}',
-                        label: 'Turkish',
-                        subLabel: pickingNative ? 'T\u00FCrk\u00E7e' : 'Study Turkish',
-                        color: pickingNative ? baseNative : baseStudy,
-                        pressedColor:
-                            pickingNative ? pressedNative : pressedStudy,
-                        isPressed:
-                            pressedLang == 'tr' && pressedIsNative == pickingNative,
-                        onTap: () => _flashAndSelect(
-                          'tr',
-                          native: pickingNative,
-                        ),
-                      ),
-                    if (!pickingNative || studyLang != 'tr')
-                      const SizedBox(height: 12),
-
-                    // UKRAINIAN
-                    if (!pickingNative || studyLang != 'uk')
-                      _LanguageButton(
-                        flag: '\u{1F1FA}\u{1F1E6}',
-                        label: 'Ukrainian',
-                        subLabel: pickingNative
-                            ? '\u0423\u043A\u0440\u0430\u0457\u043D\u0441\u044C\u043A\u0430'
-                            : 'Study Ukrainian',
-                        color: pickingNative ? baseNative : baseStudy,
-                        pressedColor:
-                            pickingNative ? pressedNative : pressedStudy,
-                        isPressed:
-                            pressedLang == 'uk' && pressedIsNative == pickingNative,
-                        onTap: () => _flashAndSelect(
-                          'uk',
-                          native: pickingNative,
-                        ),
-                      ),
-
-                    if (pickingNative) ...[
-                      const SizedBox(height: 32),
-                      TextButton(
-                        onPressed: () {
-                          _playTapClick();
-                          setState(() => studyLang = null);
-                        },
-                        child: const Text('Back to Study Language'),
-                      )
-                    ]
-                  ],
+                      const SizedBox(height: 48),
+                      for (final language in LanguageCatalog.available)
+                        if (!pickingNative || studyLang != language.code) ...[
+                          _LanguageButton(
+                            flag: language.flag,
+                            label: language.label,
+                            subLabel: pickingNative
+                                ? language.nativeLabel
+                                : 'Study ${language.label}',
+                            color: pickingNative ? baseNative : baseStudy,
+                            pressedColor:
+                                pickingNative ? pressedNative : pressedStudy,
+                            isPressed: pressedLang == language.code &&
+                                pressedIsNative == pickingNative,
+                            onTap: () => _flashAndSelect(
+                              language.code,
+                              native: pickingNative,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+                      if (pickingNative) ...[
+                        const SizedBox(height: 32),
+                        TextButton(
+                          onPressed: () {
+                            _playTapClick();
+                            setState(() => studyLang = null);
+                          },
+                          child: const Text('Back to Study Language'),
+                        )
+                      ]
+                    ],
+                  ),
                 ),
               ),
             ),
           ),
         ),
       ),
-    ),
     );
   }
 }
@@ -423,7 +289,8 @@ class _LanguageButton extends StatelessWidget {
               ],
             ),
             const Spacer(),
-            const Icon(Icons.arrow_forward_ios, color: Color(0xFF1A237E), size: 18),
+            const Icon(Icons.arrow_forward_ios,
+                color: Color(0xFF1A237E), size: 18),
           ],
         ),
       ),

@@ -1,5 +1,8 @@
+import 'dart:ui' show ImageFilter;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show SystemUiOverlayStyle;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../utils/system_ui.dart';
 
@@ -12,54 +15,53 @@ class HomeSplashPage extends StatefulWidget {
 
 class _HomeSplashPageState extends State<HomeSplashPage>
     with TickerProviderStateMixin {
-  late AnimationController _liquidController;
-  late AnimationController _logoController;
-  late Animation<double> _liquidAnimation;
-  late Animation<double> _logoAnimation;
+  late final AnimationController _surfaceController;
+  late final AnimationController _logoController;
+  late final Animation<double> _surfaceAnimation;
+  late final Animation<double> _logoAnimation;
 
   @override
   void initState() {
     super.initState();
-
-    _liquidController = AnimationController(
+    _surfaceController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1000),
+      duration: const Duration(milliseconds: 800),
     );
-
     _logoController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 600),
+      duration: const Duration(milliseconds: 650),
     );
-
-    _liquidAnimation = CurvedAnimation(
-      parent: _liquidController,
-      curve: const Cubic(0.45, 0.05, 0.55, 0.95),
+    _surfaceAnimation = CurvedAnimation(
+      parent: _surfaceController,
+      curve: Curves.easeOutCubic,
     );
-
     _logoAnimation = CurvedAnimation(
       parent: _logoController,
-      curve: Curves.elasticOut,
+      curve: Curves.easeOutBack,
     );
 
-    // Start liquid immediately
-    _liquidController.forward();
-
-    // Start logo after 400ms
-    Future.delayed(const Duration(milliseconds: 400), () {
+    _surfaceController.forward();
+    Future<void>.delayed(const Duration(milliseconds: 180), () {
       if (mounted) _logoController.forward();
     });
+    _continueToApp();
+  }
 
-    // Navigate to home after 1.5 seconds (to allow fade out transition)
-    Future.delayed(const Duration(milliseconds: 1500), () {
-      if (mounted) {
-        Navigator.of(context).pushReplacementNamed('/flashcards');
-      }
-    });
+  Future<void> _continueToApp() async {
+    await Future<void>.delayed(const Duration(milliseconds: 1800));
+    final prefs = await SharedPreferences.getInstance();
+    final hasLanguage = prefs.getString('study_language') != null &&
+        prefs.getString('native_language') != null;
+
+    if (!mounted) return;
+    Navigator.of(context).pushReplacementNamed(
+      hasLanguage ? '/flashcards' : '/language-selection',
+    );
   }
 
   @override
   void dispose() {
-    _liquidController.dispose();
+    _surfaceController.dispose();
     _logoController.dispose();
     super.dispose();
   }
@@ -69,56 +71,101 @@ class _HomeSplashPageState extends State<HomeSplashPage>
     final size = MediaQuery.of(context).size;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: overlayStyleForTop(darkTop: false),
+      value: overlayStyleForTop(darkTop: true),
       child: Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: const Color(0xFF071A2E),
         body: Stack(
           fit: StackFit.expand,
           children: [
-            // Liquid Layer Background
-            AnimatedBuilder(
-              animation: _liquidAnimation,
-              builder: (context, child) {
-                // Sliding up from bottom (-100% to -30%)
-                return Positioned(
-                  bottom: -size.height * 0.55 +
-                      (1.0 - _liquidAnimation.value) * size.height,
-                  left: -size.width * 0.35,
-                  child: Transform.rotate(
-                    angle: _liquidAnimation.value * 0.26, // approx 15 degrees
-                    child: Container(
-                      width: size.width * 1.25,
-                      height: size.height * 2.5,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF00004D),
-                        borderRadius: BorderRadius.circular(size.width * 0.6),
-                      ),
-                    ),
+            Positioned(
+              top: -size.height * 0.16,
+              right: -size.width * 0.35,
+              child: Transform.rotate(
+                angle: -0.24,
+                child: Container(
+                  width: size.width * 1.2,
+                  height: size.height * 0.42,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2AB7A9).withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(size.width),
                   ),
-                );
-              },
+                ),
+              ),
             ),
-            // Logo Reveal
+            Positioned(
+              bottom: -size.height * 0.18,
+              left: -size.width * 0.42,
+              child: Transform.rotate(
+                angle: 0.3,
+                child: Container(
+                  width: size.width * 1.28,
+                  height: size.height * 0.36,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2F80ED).withValues(alpha: 0.22),
+                    borderRadius: BorderRadius.circular(size.width),
+                  ),
+                ),
+              ),
+            ),
             Center(
               child: ScaleTransition(
-                scale: _logoAnimation,
+                scale: Tween<double>(begin: 0.82, end: 1).animate(
+                  _surfaceAnimation,
+                ),
                 child: FadeTransition(
-                  opacity: _logoAnimation,
-                  child: const Text(
-                    'vo',
-                    style: TextStyle(
-                      fontSize: 150,
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontStyle: FontStyle.italic,
-                      fontFamily: 'Inter', // Defaulting to Inter as Caveat might not be loaded
-                      shadows: [
-                        Shadow(
-                          color: Colors.black26,
-                          offset: Offset(0, 4),
-                          blurRadius: 10,
+                  opacity: _surfaceAnimation,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(32),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.28),
+                          blurRadius: 28,
+                          offset: const Offset(0, 14),
                         ),
                       ],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(32),
+                      child: BackdropFilter(
+                        filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+                        child: Container(
+                          width: 184,
+                          height: 184,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.16),
+                            borderRadius: BorderRadius.circular(32),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.58),
+                              width: 1.2,
+                            ),
+                          ),
+                          alignment: Alignment.center,
+                          child: ScaleTransition(
+                            scale: _logoAnimation,
+                            child: FadeTransition(
+                              opacity: _logoAnimation,
+                              child: const Text(
+                                'VO',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontFamily: 'Inter',
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 82,
+                                  fontStyle: FontStyle.italic,
+                                  shadows: [
+                                    Shadow(
+                                      color: Colors.black38,
+                                      offset: Offset(0, 5),
+                                      blurRadius: 12,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ),

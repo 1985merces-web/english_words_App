@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'services/billing_service.dart';
 import 'screens/home_splash.dart';
 import 'screens/flashcards_screen.dart';
 import 'screens/language_selection_screen.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await MobileAds.instance.initialize();
+  await BillingService().init();
   runApp(const WordsApp());
 }
 
@@ -16,23 +20,7 @@ class WordsApp extends StatefulWidget {
 }
 
 class _WordsAppState extends State<WordsApp> {
-  bool? hasLanguage;
   bool showENasDefault = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _checkLanguage();
-  }
-
-  Future<void> _checkLanguage() async {
-    final prefs = await SharedPreferences.getInstance();
-    final native = prefs.getString('native_language');
-    final study = prefs.getString('study_language');
-    setState(() {
-      hasLanguage = (native != null && study != null);
-    });
-  }
 
   void toggleDefaultView() {
     setState(() {
@@ -42,27 +30,17 @@ class _WordsAppState extends State<WordsApp> {
 
   @override
   Widget build(BuildContext context) {
-    // Show empty container while checking prefs
-    if (hasLanguage == null) {
-      return const MaterialApp(
-        home: Scaffold(body: Center(child: CircularProgressIndicator())),
-        debugShowCheckedModeBanner: false,
-      );
-    }
-
     return MaterialApp(
       title: 'Volary - Vocabulary Trainer',
       debugShowCheckedModeBanner: false,
-      // If language is set -> HomeSplashPage (which goes to Flashcards)
-      // If not set -> LanguageSelectionScreen
-      home: hasLanguage! ? const HomeSplashPage() : const LanguageSelectionScreen(),
+      home: const HomeSplashPage(),
       routes: {
         '/flashcards': (context) => FlashcardScreen(
               showENasDefault: showENasDefault,
               onToggleDefault: toggleDefaultView,
             ),
+        '/language-selection': (context) => const LanguageSelectionScreen(),
       },
-      // Remove initialRoute as 'home' handles it
     );
   }
 }
