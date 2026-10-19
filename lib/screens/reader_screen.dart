@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:csv/csv.dart';
 import 'package:flutter/gestures.dart';
@@ -7,7 +8,10 @@ import 'package:flutter/services.dart' show ByteData, rootBundle;
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../models/reader_book.dart';
 import '../models/word_entry.dart';
+import '../services/document_text_extractor.dart';
+import 'reader_strings.dart';
 
 class ReaderScreen extends StatefulWidget {
   final bool darkTheme;
@@ -27,6 +31,8 @@ class ReaderScreen extends StatefulWidget {
 
 class _ReaderScreenState extends State<ReaderScreen>
     with SingleTickerProviderStateMixin {
+  ReaderStrings get _strings => ReaderStrings(widget.nativeLang);
+  String _t(ReaderText key) => _strings.text(key);
   bool _isLoading = true;
   final Map<String, String> _dictionary = {};
   final Map<String, String> _onlineTranslationCache = {};
@@ -39,27 +45,39 @@ class _ReaderScreenState extends State<ReaderScreen>
   final TextEditingController _customTextController = TextEditingController();
   bool _isReadingCustomText = false;
   String _customTextToRead = '';
+  bool _isImportingDocument = false;
+  String? _importedDocumentName;
 
   // Predefined stories
   final List<Map<String, String>> _stories = [
     {
-      'title': 'The Lost Key (Easy - A2)',
+      'title': 'The Lost Key',
+      'level': 'A2',
       'content':
           'One sunny morning, Lily found an old, rusty key in her garden. It was lying under a big rose bush. She wondered what it opened. She ran to her grandmother and showed it to her. Her grandmother smiled and told her about an old wooden chest in the attic. Lily was very excited and went upstairs to search for the chest. In a dark corner of the attic, she found it covered in dust. She inserted the key, turned it with a click, and the box opened slowly. Inside, she found old photographs and a beautiful silver pocket watch.',
     },
     {
-      'title': 'The Mysterious Traveler (Medium - B2)',
+      'title': 'The Mysterious Traveler',
+      'level': 'B2',
       'content':
           'A mysterious traveler arrived in the quiet valley just as the sun set behind the mountains. He wore a long dark coat and carried a wooden suitcase covered in strange symbols. The locals watched him from behind their curtains with curiosity and suspicion. He checked into the only inn at the edge of the town. During the night, strange melodies drifted from his room, played on an instrument no one had ever seen before. The next morning, he disappeared, leaving the suitcase behind. When the innkeeper opened it, he found only a collection of glowing blue stones and a map of the stars.',
     },
     {
-      'title': 'The Future of AI (Advanced - C1)',
+      'title': 'The Future of AI',
+      'level': 'C1',
       'content':
           'The rapid evolution of artificial intelligence has sparked intense debates across global industries. Critics argue that unchecked development could lead to widespread labor displacement and reinforce systemic biases embedded in training datasets. Conversely, proponents emphasize the transformative potential of machine learning systems in accelerating scientific discoveries, optimizing energy grids, and providing personalized education. As the boundary between human capability and algorithmic automation blurs, establishing robust ethical guidelines and regulatory frameworks becomes imperative to ensure that technological progress aligns with human values.',
     },
   ];
 
   int _selectedStoryIndex = 0;
+  int _selectedChapterIndex = 0;
+  Future<ReaderBook>? _selectedBook;
+  SharedPreferences? _preferences;
+  int? _lastBookId;
+  int _initialParagraph = 0;
+  int _selectionGeneration = 0;
+  GlobalKey<_BookChapterViewState> _chapterViewKey = GlobalKey();
 
   @override
   void initState() {
@@ -79,10 +97,74 @@ class _ReaderScreenState extends State<ReaderScreen>
   Future<void> _initializeScreen() async {
     await _loadDictionary();
     await _loadCustomListInfo();
+    _preferences = await SharedPreferences.getInstance();
+    _lastBookId = _preferences!.getInt('reader_last_book_id');
     _flutterTts.setLanguage(widget.studyLang);
+    if (!mounted) return;
     setState(() {
       _isLoading = false;
     });
+  }
+
+  ({int chapter, int paragraph}) _bookProgress(int bookId) {
+    try {
+      final raw = _preferences?.getString('reader_book_progress_$bookId');
+      if (raw == null) return (chapter: 0, paragraph: 0);
+      final data = jsonDecode(raw);
+      if (data is Map && data['chapter'] is int && data['paragraph'] is int) {
+        return (
+          chapter: data['chapter'] as int,
+          paragraph: data['paragraph'] as int
+        );
+      }
+    } catch (_) {
+      // Ignore obsolete or damaged local progress.
+    }
+    return (chapter: 0, paragraph: 0);
+  }
+
+  void _saveBookProgress(int bookId, int chapter, int paragraph) {
+    _preferences?.setString('reader_book_progress_$bookId',
+        jsonEncode({'chapter': chapter, 'paragraph': paragraph}));
+  }
+
+  Future<void> _selectStory(int index) async {
+    _chapterViewKey.currentState?._savePosition();
+    final generation = ++_selectionGeneration;
+    if (index < _stories.length) {
+      setState(() {
+        _selectedStoryIndex = index;
+        _selectedBook = null;
+      });
+      return;
+    }
+    final info = ReaderBookInfo.englishBooks[index - _stories.length];
+    final bookFuture = ReaderBook.load(info);
+    setState(() {
+      _selectedStoryIndex = index;
+      _selectedChapterIndex = 0;
+      _initialParagraph = 0;
+      _selectedBook = bookFuture;
+      _chapterViewKey = GlobalKey();
+    });
+    try {
+      final book = await bookFuture;
+      if (!mounted || generation != _selectionGeneration) return;
+      final progress = _bookProgress(info.id);
+      final chapter = progress.chapter.clamp(0, book.chapters.length - 1);
+      final paragraph = progress.paragraph
+          .clamp(0, book.chapters[chapter].paragraphs.length - 1);
+      setState(() {
+        _selectedChapterIndex = chapter;
+        _initialParagraph = paragraph;
+        _lastBookId = info.id;
+        _chapterViewKey = GlobalKey();
+      });
+      _preferences?.setInt('reader_last_book_id', info.id);
+      _saveBookProgress(info.id, chapter, paragraph);
+    } catch (_) {
+      // FutureBuilder displays the localized load error.
+    }
   }
 
   // Load word mappings from study to native language CSV files
@@ -143,6 +225,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   // Load custom list names and the selected target custom list
   Future<void> _loadCustomListInfo() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
     setState(() {
       _customListNames = prefs.getStringList('custom_list_names') ?? [];
       _selectedCustomList = prefs.getString('targetCustomSet') ?? '';
@@ -151,6 +234,43 @@ class _ReaderScreenState extends State<ReaderScreen>
         _selectedCustomList = _customListNames.first;
       }
     });
+  }
+
+  Future<void> _importDocument() async {
+    if (_isImportingDocument) return;
+
+    setState(() => _isImportingDocument = true);
+    try {
+      final imported = await DocumentTextExtractor.pickAndExtract();
+      if (!mounted || imported == null) return;
+
+      setState(() {
+        _customTextController.text = imported.text;
+        _customTextToRead = imported.text;
+        _importedDocumentName = imported.name;
+        _isReadingCustomText = true;
+      });
+    } on DocumentTextExtractionException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_strings.documentError(error.error)),
+          backgroundColor: Colors.orange.shade800,
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_t(ReaderText.importFailed)),
+          backgroundColor: Colors.orange.shade800,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isImportingDocument = false);
+      }
+    }
   }
 
   // Stemming-based word translation lookup
@@ -349,7 +469,8 @@ class _ReaderScreenState extends State<ReaderScreen>
                     translationController.text = onlineTranslation;
                     onlineTranslationError = null;
                   } else {
-                    onlineTranslationError = 'Online translation unavailable.';
+                    onlineTranslationError =
+                        _t(ReaderText.translationUnavailable);
                   }
                 });
               });
@@ -421,7 +542,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                     ],
                   ),
                   const SizedBox(height: 16),
-                  Text('Translation / Переклад:', style: labelStyle),
+                  Text(_t(ReaderText.translation), style: labelStyle),
                   const SizedBox(height: 8),
                   TextField(
                     controller: translationController,
@@ -433,7 +554,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                       color: widget.darkTheme ? Colors.white : Colors.black87,
                     ),
                     decoration: InputDecoration(
-                      hintText: 'Введіть переклад слова...',
+                      hintText: _t(ReaderText.translationHint),
                       hintStyle: TextStyle(
                         color:
                             widget.darkTheme ? Colors.white38 : Colors.black38,
@@ -455,7 +576,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                     const SizedBox(height: 8),
                     Text(
                       isOnlineTranslating
-                          ? 'Translating online...'
+                          ? _t(ReaderText.translating)
                           : onlineTranslationError!,
                       style: TextStyle(
                         fontSize: 13,
@@ -468,12 +589,11 @@ class _ReaderScreenState extends State<ReaderScreen>
                     ),
                   ],
                   const SizedBox(height: 20),
-                  Text('Target Custom List / Список збереження:',
-                      style: labelStyle),
+                  Text(_t(ReaderText.targetList), style: labelStyle),
                   const SizedBox(height: 8),
                   if (_customListNames.isEmpty) ...[
                     Text(
-                      'No custom lists created yet. Please create one below.',
+                      _t(ReaderText.noLists),
                       style: TextStyle(
                         color:
                             widget.darkTheme ? Colors.white54 : Colors.black54,
@@ -497,7 +617,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                               : null,
                           dropdownColor: sheetBgColor,
                           hint: Text(
-                            'Select Custom List',
+                            _t(ReaderText.selectList),
                             style: TextStyle(
                               color: widget.darkTheme
                                   ? Colors.white38
@@ -543,8 +663,8 @@ class _ReaderScreenState extends State<ReaderScreen>
                   TextButton.icon(
                     onPressed: () => _showCreateListDialog(setSheetState),
                     icon: const Icon(Icons.add, size: 20),
-                    label: const Text('Створити новий список',
-                        style: TextStyle(fontSize: 16)),
+                    label: Text(_t(ReaderText.createList),
+                        style: const TextStyle(fontSize: 16)),
                     style: TextButton.styleFrom(
                       foregroundColor: Colors.green,
                       alignment: Alignment.centerLeft,
@@ -556,8 +676,8 @@ class _ReaderScreenState extends State<ReaderScreen>
                       final trans = translationController.text.trim();
                       if (trans.isEmpty) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Будь ласка, введіть переклад.'),
+                          SnackBar(
+                            content: Text(_t(ReaderText.enterTranslation)),
                             backgroundColor: Colors.orange,
                           ),
                         );
@@ -574,9 +694,9 @@ class _ReaderScreenState extends State<ReaderScreen>
                         borderRadius: BorderRadius.circular(16),
                       ),
                     ),
-                    child: const Text(
-                      'Зберегти слово',
-                      style: TextStyle(
+                    child: Text(
+                      _t(ReaderText.saveWord),
+                      style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                         color: Colors.white,
@@ -602,7 +722,7 @@ class _ReaderScreenState extends State<ReaderScreen>
             ? const Color(0xFF2C3E50)
             : const Color(0xFFFDFBFF),
         title: Text(
-          'Створити власний список',
+          _t(ReaderText.createListTitle),
           style: TextStyle(
             color: widget.darkTheme ? Colors.white : Colors.black87,
           ),
@@ -616,7 +736,7 @@ class _ReaderScreenState extends State<ReaderScreen>
             color: widget.darkTheme ? Colors.white : Colors.black87,
           ),
           decoration: InputDecoration(
-            hintText: 'Назва списку (напр. Сім\'я)',
+            hintText: _t(ReaderText.listNameHint),
             hintStyle: TextStyle(
               color: widget.darkTheme ? Colors.white38 : Colors.black38,
             ),
@@ -624,13 +744,13 @@ class _ReaderScreenState extends State<ReaderScreen>
         ),
         actions: [
           TextButton(
-            child:
-                const Text('Скасувати', style: TextStyle(color: Colors.grey)),
+            child: Text(_t(ReaderText.cancel),
+                style: const TextStyle(color: Colors.grey)),
             onPressed: () => Navigator.pop(context),
           ),
           TextButton(
-            child: const Text('Створити',
-                style: TextStyle(
+            child: Text(_t(ReaderText.create),
+                style: const TextStyle(
                     color: Colors.green, fontWeight: FontWeight.bold)),
             onPressed: () async {
               final name = newListNameController.text.trim();
@@ -668,8 +788,8 @@ class _ReaderScreenState extends State<ReaderScreen>
   Future<void> _saveWordToCustomList(String word, String translation) async {
     if (_selectedCustomList.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Помилка: не вибрано список для збереження.'),
+        SnackBar(
+          content: Text(_t(ReaderText.noTargetList)),
           backgroundColor: Colors.orange,
         ),
       );
@@ -712,7 +832,8 @@ class _ReaderScreenState extends State<ReaderScreen>
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Слово "$word" вже є в цьому списку.'),
+          content:
+              Text(_t(ReaderText.duplicateWord).replaceAll('{word}', word)),
           backgroundColor: Colors.blueGrey,
         ),
       );
@@ -761,10 +882,114 @@ class _ReaderScreenState extends State<ReaderScreen>
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Слово "$word" збережено в список "$cleanListName"!'),
+        content: Text(_t(ReaderText.savedWord)
+            .replaceAll('{word}', word)
+            .replaceAll('{list}', cleanListName)),
         backgroundColor: Colors.green,
         duration: const Duration(seconds: 2),
       ),
+    );
+  }
+
+  Widget _buildBookReader(
+      Color cardColor, Color primaryColor, TextStyle textStyle) {
+    return FutureBuilder<ReaderBook>(
+      future: _selectedBook,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError || !snapshot.hasData) {
+          return Center(
+              child: Text(_t(ReaderText.bookLoadFailed), style: textStyle));
+        }
+        final chapters = snapshot.data!.chapters;
+        final chapter = chapters[_selectedChapterIndex];
+        final bookId = ReaderBookInfo
+            .englishBooks[_selectedStoryIndex - _stories.length].id;
+        final storyIndex = _selectedStoryIndex;
+        final chapterIndex = _selectedChapterIndex;
+        void selectChapter(int index) {
+          _chapterViewKey.currentState?._savePosition();
+          _saveBookProgress(bookId, index, 0);
+          setState(() {
+            _selectedChapterIndex = index;
+            _initialParagraph = 0;
+            _chapterViewKey = GlobalKey();
+          });
+        }
+
+        return Column(
+          children: [
+            Row(
+              children: [
+                IconButton(
+                  tooltip: _t(ReaderText.previousChapter),
+                  onPressed: _selectedChapterIndex == 0
+                      ? null
+                      : () => selectChapter(_selectedChapterIndex - 1),
+                  icon: const Icon(Icons.chevron_left),
+                  color: primaryColor,
+                ),
+                Expanded(
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<int>(
+                      value: _selectedChapterIndex,
+                      isExpanded: true,
+                      dropdownColor: cardColor,
+                      style: textStyle.copyWith(
+                          fontSize: 14, fontWeight: FontWeight.w600),
+                      items: List.generate(
+                          chapters.length,
+                          (index) => DropdownMenuItem(
+                                value: index,
+                                child: Text(chapters[index].title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis),
+                              )),
+                      onChanged: (index) {
+                        if (index != null) selectChapter(index);
+                      },
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: _t(ReaderText.nextChapter),
+                  onPressed: _selectedChapterIndex + 1 >= chapters.length
+                      ? null
+                      : () => selectChapter(_selectedChapterIndex + 1),
+                  icon: const Icon(Icons.chevron_right),
+                  color: primaryColor,
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: KeyedSubtree(
+                key: ValueKey(
+                    'book-$_selectedStoryIndex-chapter-$_selectedChapterIndex-start-$_initialParagraph'),
+                child: _BookChapterView(
+                  key: _chapterViewKey,
+                  paragraphs: chapter.paragraphs,
+                  initialParagraph: _initialParagraph,
+                  darkTheme: widget.darkTheme,
+                  buildSpans: (text) => _buildTextSpans(text, context),
+                  nextChapterLabel: _t(ReaderText.nextChapter),
+                  onNextChapter: chapterIndex + 1 >= chapters.length
+                      ? null
+                      : () => selectChapter(chapterIndex + 1),
+                  onPositionChanged: (paragraph) {
+                    if (_selectedStoryIndex == storyIndex &&
+                        _selectedChapterIndex == chapterIndex) {
+                      _saveBookProgress(bookId, chapterIndex, paragraph);
+                    }
+                  },
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -774,9 +999,15 @@ class _ReaderScreenState extends State<ReaderScreen>
         widget.darkTheme ? const Color(0xFF1E2A3A) : const Color(0xFFF5F6FA);
     final cardColor = widget.darkTheme ? const Color(0xFF2C3E50) : Colors.white;
     final primaryColor =
-        widget.darkTheme ? Colors.lightBlueAccent : const Color(0xFF1A237E);
+        widget.darkTheme ? Colors.lightBlueAccent : const Color(0xFF1E3A8A);
+    final contentTextColor =
+        widget.darkTheme ? Colors.white : const Color(0xFF172033);
+    final mutedTextColor =
+        widget.darkTheme ? Colors.white70 : const Color(0xFF4B5563);
+    final hintTextColor =
+        widget.darkTheme ? Colors.white60 : const Color(0xFF64748B);
     final textStyle = TextStyle(
-      color: widget.darkTheme ? Colors.white : Colors.black87,
+      color: contentTextColor,
       fontFamily: 'Inter',
     );
 
@@ -784,9 +1015,13 @@ class _ReaderScreenState extends State<ReaderScreen>
       return Scaffold(
         backgroundColor: bgColor,
         appBar: AppBar(
-          title: const Text('Читалка / Reader'),
+          title: Text(
+            _t(ReaderText.title),
+            style: const TextStyle(color: Colors.white),
+          ),
           backgroundColor:
               widget.darkTheme ? const Color(0xFF1A237E) : primaryColor,
+          foregroundColor: Colors.white,
           elevation: 0,
         ),
         body: const Center(child: CircularProgressIndicator()),
@@ -796,77 +1031,44 @@ class _ReaderScreenState extends State<ReaderScreen>
     return Scaffold(
       backgroundColor: bgColor,
       appBar: AppBar(
-        title: const Text('Читалка / Reader',
-            style: TextStyle(fontWeight: FontWeight.bold)),
+        title: Text(_t(ReaderText.title),
+            style: const TextStyle(
+                fontWeight: FontWeight.bold, color: Colors.white)),
         backgroundColor:
             widget.darkTheme ? const Color(0xFF1A237E) : primaryColor,
+        foregroundColor: Colors.white,
         elevation: 0,
         bottom: TabBar(
           controller: _tabController,
           indicatorColor: Colors.white,
+          dividerColor: Colors.transparent,
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.white70,
           labelStyle:
               const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-          tabs: const [
-            Tab(text: 'Тексти / Stories'),
-            Tab(text: 'Власний текст'),
+          tabs: [
+            Tab(text: _t(ReaderText.stories)),
+            Tab(text: _t(ReaderText.customText)),
           ],
         ),
       ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          // Predefined Stories View
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Predefined Story Selector Dropdown
-              Container(
-                margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                decoration: BoxDecoration(
-                  color: cardColor,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.04),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<int>(
-                    value: _selectedStoryIndex,
-                    dropdownColor: cardColor,
-                    isExpanded: true,
-                    style: textStyle.copyWith(
-                        fontSize: 16, fontWeight: FontWeight.bold),
-                    icon: Icon(Icons.arrow_drop_down, color: primaryColor),
-                    items: List.generate(_stories.length, (index) {
-                      return DropdownMenuItem<int>(
-                        value: index,
-                        child: Text(_stories[index]['title']!),
-                      );
-                    }),
-                    onChanged: (int? newValue) {
-                      if (newValue != null) {
-                        setState(() {
-                          _selectedStoryIndex = newValue;
-                        });
-                      }
-                    },
-                  ),
-                ),
-              ),
-              // Story text reader area
-              Expanded(
-                child: Container(
-                  margin: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                  padding: const EdgeInsets.all(20),
+      body: SafeArea(
+        top: false,
+        child: TabBarView(
+          controller: _tabController,
+          children: [
+            // Predefined Stories View
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Predefined Story Selector Dropdown
+                Container(
+                  margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   decoration: BoxDecoration(
                     color: cardColor,
-                    borderRadius: BorderRadius.circular(20),
+                    borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
                         color: Colors.black.withValues(alpha: 0.04),
@@ -875,173 +1077,491 @@ class _ReaderScreenState extends State<ReaderScreen>
                       ),
                     ],
                   ),
-                  child: SingleChildScrollView(
-                    physics: const BouncingScrollPhysics(),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<int>(
+                      value: _selectedStoryIndex,
+                      dropdownColor: cardColor,
+                      isExpanded: true,
+                      style: textStyle.copyWith(
+                          fontSize: 16, fontWeight: FontWeight.bold),
+                      icon: Icon(Icons.arrow_drop_down, color: primaryColor),
+                      items: [
+                        ...List.generate(_stories.length, (index) {
+                          final story = _stories[index];
+                          final difficulty = switch (story['level']) {
+                            'A2' => ReaderText.easy,
+                            'B2' => ReaderText.medium,
+                            _ => ReaderText.advanced,
+                          };
+                          return DropdownMenuItem<int>(
+                            value: index,
+                            child: Text(
+                              '${story['title']} (${_t(difficulty)} - ${story['level']})',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          );
+                        }),
+                        if (widget.studyLang == 'en')
+                          ...ReaderBookInfo.englishBooks.asMap().entries.map(
+                                (entry) => DropdownMenuItem<int>(
+                                  value: _stories.length + entry.key,
+                                  child: Text(
+                                    '${entry.value.title} — ${entry.value.author}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ),
+                      ],
+                      onChanged: (int? newValue) {
+                        if (newValue != null) _selectStory(newValue);
+                      },
+                    ),
+                  ),
+                ),
+                if (widget.studyLang == 'en' &&
+                    _lastBookId != null &&
+                    ReaderBookInfo.englishBooks
+                        .any((b) => b.id == _lastBookId) &&
+                    (_selectedStoryIndex < _stories.length ||
+                        ReaderBookInfo
+                                .englishBooks[
+                                    _selectedStoryIndex - _stories.length]
+                                .id !=
+                            _lastBookId))
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: () => _selectStory(_stories.length +
+                            ReaderBookInfo.englishBooks
+                                .indexWhere((b) => b.id == _lastBookId)),
+                        icon: const Icon(Icons.bookmark_outline),
+                        label: Text(_t(ReaderText.continueReading)),
+                      ),
+                    ),
+                  ),
+                // Story text reader area
+                Expanded(
+                  child: Container(
+                    margin: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: cardColor,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.04),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: _selectedBook != null
+                        ? _buildBookReader(cardColor, primaryColor, textStyle)
+                        : SingleChildScrollView(
+                            physics: const BouncingScrollPhysics(),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _t(ReaderText.tip),
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: mutedTextColor,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                RichText(
+                                  text: TextSpan(
+                                    children: _buildTextSpans(
+                                        _stories[_selectedStoryIndex]
+                                            ['content']!,
+                                        context),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                  ),
+                ),
+              ],
+            ),
+
+            // Custom Text View
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: _isReadingCustomText
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        ElevatedButton.icon(
+                          onPressed: () {
+                            setState(() {
+                              _isReadingCustomText = false;
+                            });
+                          },
+                          icon: const Icon(Icons.edit, color: Colors.white),
+                          label: Text(_t(ReaderText.editText),
+                              style: const TextStyle(color: Colors.white)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: primaryColor,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.all(20),
+                            decoration: BoxDecoration(
+                              color: cardColor,
+                              borderRadius: BorderRadius.circular(20),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.04),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
+                            ),
+                            child: SingleChildScrollView(
+                              physics: const BouncingScrollPhysics(),
+                              child: RichText(
+                                text: TextSpan(
+                                  children: _buildTextSpans(
+                                      _customTextToRead, context),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Text(
-                          'Порада: тицяйте на будь-яке слово, щоб дізнатися його переклад.',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: widget.darkTheme
-                                ? Colors.white54
-                                : Colors.black54,
-                            fontStyle: FontStyle.italic,
+                          _t(ReaderText.customTextPrompt),
+                          style: textStyle.copyWith(
+                              fontSize: 16, fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          height: 52,
+                          child: OutlinedButton.icon(
+                            onPressed:
+                                _isImportingDocument ? null : _importDocument,
+                            icon: _isImportingDocument
+                                ? SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: primaryColor,
+                                    ),
+                                  )
+                                : const Icon(Icons.upload_file_outlined),
+                            label: Text(
+                              _isImportingDocument
+                                  ? _t(ReaderText.importing)
+                                  : _t(ReaderText.importFile),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: primaryColor,
+                              side: BorderSide(color: primaryColor),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                          ),
+                        ),
+                        if (_importedDocumentName != null) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            _importedDocumentName!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: mutedTextColor,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 12),
+                        Expanded(
+                          child: TextField(
+                            controller: _customTextController,
+                            maxLines: null,
+                            expands: true,
+                            cursorColor: primaryColor,
+                            style: TextStyle(
+                              color: contentTextColor,
+                              fontSize: 18,
+                            ),
+                            decoration: InputDecoration(
+                              hintText: _t(ReaderText.textHint),
+                              hintStyle: TextStyle(
+                                color: hintTextColor,
+                              ),
+                              filled: true,
+                              fillColor: cardColor,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(20),
+                                borderSide: BorderSide(
+                                  color: widget.darkTheme
+                                      ? Colors.white12
+                                      : Colors.black12,
+                                ),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(20),
+                                borderSide:
+                                    BorderSide(color: primaryColor, width: 2),
+                              ),
+                              contentPadding: const EdgeInsets.all(18),
+                            ),
                           ),
                         ),
                         const SizedBox(height: 16),
-                        RichText(
-                          text: TextSpan(
-                            children: _buildTextSpans(
-                                _stories[_selectedStoryIndex]['content']!,
-                                context),
+                        ElevatedButton(
+                          onPressed: () {
+                            final text = _customTextController.text.trim();
+                            if (text.isEmpty) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(_t(ReaderText.emptyText)),
+                                  backgroundColor: Colors.orange,
+                                ),
+                              );
+                              return;
+                            }
+                            setState(() {
+                              _customTextToRead = text;
+                              _isReadingCustomText = true;
+                            });
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF15803D),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16)),
+                          ),
+                          child: Text(
+                            _t(ReaderText.readText),
+                            style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white),
                           ),
                         ),
                       ],
                     ),
-                  ),
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
-          // Custom Text View
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: _isReadingCustomText
-                ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      ElevatedButton.icon(
-                        onPressed: () {
-                          setState(() {
-                            _isReadingCustomText = false;
-                          });
-                        },
-                        icon: const Icon(Icons.edit, color: Colors.white),
-                        label: const Text('Редагувати текст',
-                            style: TextStyle(color: Colors.white)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: primaryColor,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12)),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                            color: cardColor,
-                            borderRadius: BorderRadius.circular(20),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.04),
-                                blurRadius: 10,
-                                offset: const Offset(0, 4),
-                              ),
-                            ],
-                          ),
-                          child: SingleChildScrollView(
-                            physics: const BouncingScrollPhysics(),
-                            child: RichText(
-                              text: TextSpan(
-                                children:
-                                    _buildTextSpans(_customTextToRead, context),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  )
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        'Вставте сюди свій англійський текст, щоб читати та перекладати окремі слова:',
-                        style: textStyle.copyWith(
-                            fontSize: 16, fontWeight: FontWeight.w600),
-                      ),
-                      const SizedBox(height: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: _customTextController,
-                          maxLines: null,
-                          expands: true,
-                          cursorColor: primaryColor,
-                          style: TextStyle(
-                            color: widget.darkTheme
-                                ? Colors.white
-                                : Colors.black87,
-                            fontSize: 18,
-                          ),
-                          decoration: InputDecoration(
-                            hintText: 'Вставте ваш текст сюди...',
-                            hintStyle: TextStyle(
-                              color: widget.darkTheme
-                                  ? Colors.white38
-                                  : Colors.black38,
-                            ),
-                            filled: true,
-                            fillColor: cardColor,
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(20),
-                              borderSide: BorderSide(
-                                color: widget.darkTheme
-                                    ? Colors.white12
-                                    : Colors.black12,
-                              ),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(20),
-                              borderSide:
-                                  BorderSide(color: primaryColor, width: 2),
-                            ),
-                            contentPadding: const EdgeInsets.all(18),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      ElevatedButton(
-                        onPressed: () {
-                          final text = _customTextController.text.trim();
-                          if (text.isEmpty) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                    'Текст порожній! Будь ласка, введіть або вставте текст.'),
-                                backgroundColor: Colors.orange,
-                              ),
-                            );
-                            return;
-                          }
-                          setState(() {
-                            _customTextToRead = text;
-                            _isReadingCustomText = true;
-                          });
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF2E7D32),
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16)),
-                        ),
-                        child: const Text(
-                          'Читати текст',
-                          style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white),
-                        ),
-                      ),
-                    ],
-                  ),
+class _BookChapterView extends StatefulWidget {
+  const _BookChapterView({
+    super.key,
+    required this.paragraphs,
+    required this.initialParagraph,
+    required this.darkTheme,
+    required this.buildSpans,
+    required this.nextChapterLabel,
+    required this.onNextChapter,
+    required this.onPositionChanged,
+  });
+
+  final List<String> paragraphs;
+  final int initialParagraph;
+  final bool darkTheme;
+  final List<TextSpan> Function(String) buildSpans;
+  final String nextChapterLabel;
+  final VoidCallback? onNextChapter;
+  final ValueChanged<int> onPositionChanged;
+
+  @override
+  State<_BookChapterView> createState() => _BookChapterViewState();
+}
+
+class _BookChapterViewState extends State<_BookChapterView>
+    with WidgetsBindingObserver {
+  final _viewportKey = GlobalKey();
+  final _centerKey = const ValueKey('chapter-center');
+  late final List<GlobalKey> _paragraphKeys;
+  Timer? _saveTimer;
+  late int _visibleParagraph;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _visibleParagraph = widget.initialParagraph;
+    _paragraphKeys =
+        List.generate(widget.paragraphs.length, (_) => GlobalKey());
+  }
+
+  void _capturePosition() {
+    final viewport =
+        _viewportKey.currentContext?.findRenderObject() as RenderBox?;
+    if (viewport == null || !viewport.attached || !viewport.hasSize) return;
+    final top = viewport.localToGlobal(Offset.zero).dy;
+    final bottom = top + viewport.size.height;
+    double? bestTop;
+    for (var index = 0; index < _paragraphKeys.length; index++) {
+      final box = _paragraphKeys[index].currentContext?.findRenderObject()
+          as RenderBox?;
+      if (box == null || !box.attached || !box.hasSize) continue;
+      final itemTop = box.localToGlobal(Offset.zero).dy;
+      final itemBottom = itemTop + box.size.height;
+      if (itemBottom <= top || itemTop >= bottom) continue;
+      if (bestTop == null || itemTop < bestTop) {
+        bestTop = itemTop;
+        _visibleParagraph = index;
+      }
+    }
+  }
+
+  void _savePosition() {
+    _saveTimer?.cancel();
+    _capturePosition();
+    widget.onPositionChanged(_visibleParagraph);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _savePosition();
+    }
+  }
+
+  @override
+  void dispose() {
+    _savePosition();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  Widget _paragraph(int index) => Padding(
+        key: _paragraphKeys[index],
+        padding: const EdgeInsets.only(bottom: 16),
+        child: _BookParagraph(
+          text: widget.paragraphs[index],
+          darkTheme: widget.darkTheme,
+          buildSpans: widget.buildSpans,
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final anchor = widget.initialParagraph;
+    return NotificationListener<ScrollNotification>(
+      onNotification: (notification) {
+        if (notification.depth == 0 &&
+            notification is ScrollUpdateNotification) {
+          _saveTimer?.cancel();
+          _saveTimer = Timer(const Duration(milliseconds: 400), _savePosition);
+        } else if (notification.depth == 0 &&
+            notification is ScrollEndNotification) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _savePosition();
+          });
+        }
+        return false;
+      },
+      child: CustomScrollView(
+        key: _viewportKey,
+        center: _centerKey,
+        physics: const BouncingScrollPhysics(),
+        slivers: [
+          SliverList.builder(
+            itemCount: anchor,
+            itemBuilder: (context, index) => _paragraph(anchor - 1 - index),
+          ),
+          SliverList.builder(
+            key: _centerKey,
+            itemCount: widget.paragraphs.length - anchor + 1,
+            itemBuilder: (context, index) {
+              final paragraph = anchor + index;
+              if (paragraph < widget.paragraphs.length) {
+                return _paragraph(paragraph);
+              }
+              return Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: widget.onNextChapter,
+                  icon: const Icon(Icons.chevron_right),
+                  label: Text(widget.nextChapterLabel),
+                ),
+              );
+            },
           ),
         ],
       ),
     );
   }
+}
+
+class _BookParagraph extends StatefulWidget {
+  const _BookParagraph({
+    required this.text,
+    required this.darkTheme,
+    required this.buildSpans,
+  });
+
+  final String text;
+  final bool darkTheme;
+  final List<TextSpan> Function(String) buildSpans;
+
+  @override
+  State<_BookParagraph> createState() => _BookParagraphState();
+}
+
+class _BookParagraphState extends State<_BookParagraph> {
+  late List<TextSpan> _spans;
+
+  @override
+  void initState() {
+    super.initState();
+    _spans = widget.buildSpans(widget.text);
+  }
+
+  @override
+  void didUpdateWidget(covariant _BookParagraph oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.text != widget.text ||
+        oldWidget.darkTheme != widget.darkTheme) {
+      _disposeSpans();
+      _spans = widget.buildSpans(widget.text);
+    }
+  }
+
+  void _disposeSpans() {
+    for (final span in _spans) {
+      span.recognizer?.dispose();
+    }
+  }
+
+  @override
+  void dispose() {
+    _disposeSpans();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      RichText(text: TextSpan(children: _spans));
 }

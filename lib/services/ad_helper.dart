@@ -1,10 +1,18 @@
 import 'dart:io';
-import 'package:google_mobile_ads/google_mobile_ads.dart';
+
 import 'package:flutter/foundation.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
+
+import 'interstitial_ad_manager.dart';
 
 class AdHelper {
-  static InterstitialAd? _interstitialAd;
-  static bool _isAdLoaded = false;
+  static final _defaultManager = InterstitialAdManager(load: _loadAd);
+
+  @visibleForTesting
+  static InterstitialAdManager? debugManagerOverride;
+
+  static InterstitialAdManager get _manager =>
+      debugManagerOverride ?? _defaultManager;
 
   static String get interstitialAdUnitId {
     if (Platform.isAndroid) {
@@ -15,45 +23,44 @@ class AdHelper {
     throw UnsupportedError('Unsupported platform');
   }
 
-  static void loadInterstitialAd() {
-    InterstitialAd.load(
-      adUnitId: interstitialAdUnitId,
-      request: const AdRequest(),
-      adLoadCallback: InterstitialAdLoadCallback(
-        onAdLoaded: (ad) {
-          _interstitialAd = ad;
-          _isAdLoaded = true;
-          debugPrint('InterstitialAd loaded.');
-        },
-        onAdFailedToLoad: (error) {
-          debugPrint('InterstitialAd failed to load: $error');
-          _isAdLoaded = false;
-        },
-      ),
+  static Future<void> _loadAd({
+    required void Function(InterstitialHandle ad) onLoaded,
+    required void Function(Object error) onFailed,
+  }) =>
+      InterstitialAd.load(
+        adUnitId: interstitialAdUnitId,
+        request: const AdRequest(),
+        adLoadCallback: InterstitialAdLoadCallback(
+          onAdLoaded: (ad) => onLoaded(_GoogleInterstitial(ad)),
+          onAdFailedToLoad: onFailed,
+        ),
+      );
+
+  static void loadInterstitialAd() => _manager.preload();
+
+  static void showInterstitialAd({required VoidCallback onAdClosed}) =>
+      _manager.show(onAdClosed: onAdClosed);
+}
+
+class _GoogleInterstitial implements InterstitialHandle {
+  _GoogleInterstitial(this.ad);
+
+  final InterstitialAd ad;
+
+  @override
+  Future<void> show({
+    required VoidCallback onShown,
+    required VoidCallback onDismissed,
+    required void Function(Object error) onFailed,
+  }) {
+    ad.fullScreenContentCallback = FullScreenContentCallback(
+      onAdShowedFullScreenContent: (_) => onShown(),
+      onAdDismissedFullScreenContent: (_) => onDismissed(),
+      onAdFailedToShowFullScreenContent: (_, error) => onFailed(error),
     );
+    return ad.show();
   }
 
-  static void showInterstitialAd({required VoidCallback onAdClosed}) {
-    if (_isAdLoaded && _interstitialAd != null) {
-      _interstitialAd!.fullScreenContentCallback = FullScreenContentCallback(
-        onAdDismissedFullScreenContent: (ad) {
-          ad.dispose();
-          _isAdLoaded = false;
-          onAdClosed();
-          loadInterstitialAd(); // Load the next ad
-        },
-        onAdFailedToShowFullScreenContent: (ad, error) {
-          debugPrint('Failed to show InterstitialAd: $error');
-          ad.dispose();
-          _isAdLoaded = false;
-          onAdClosed();
-          loadInterstitialAd();
-        },
-      );
-      _interstitialAd!.show();
-    } else {
-      debugPrint('InterstitialAd not ready yet.');
-      onAdClosed();
-    }
-  }
+  @override
+  Future<void> dispose() => ad.dispose();
 }

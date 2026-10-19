@@ -14,20 +14,22 @@ import 'package:flutter/services.dart'
         SystemNavigator,
         SystemSound,
         SystemSoundType,
-        rootBundle,
-        Clipboard,
-        ClipboardData;
+        rootBundle;
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/word_entry.dart';
+import '../models/card_navigation.dart';
 import '../models/language_catalog.dart';
 import '../utils/system_ui.dart';
 import '../services/ad_helper.dart';
 import '../services/billing_service.dart';
 import 'reader_screen.dart';
+import '../widgets/adaptive_card_text.dart';
+import '../widgets/grid_card_text_layout.dart';
+import '../widgets/premium_paywall_sheet.dart';
 
 class _LiquidGlassSurface extends StatelessWidget {
   const _LiquidGlassSurface({
@@ -134,71 +136,6 @@ class _GlassIconSurface extends StatelessWidget {
   }
 }
 
-class _AdaptiveCardText extends StatelessWidget {
-  const _AdaptiveCardText({
-    required this.text,
-    required this.style,
-    required this.maxLines,
-    required this.maxHeight,
-    required this.minFontSize,
-  });
-
-  final String text;
-  final TextStyle style;
-  final int maxLines;
-  final double maxHeight;
-  final double minFontSize;
-
-  double _fontSizeFor(BuildContext context, double maxWidth) {
-    final initialFontSize = style.fontSize ?? 14;
-    final textDirection = Directionality.of(context);
-    final textScaler = MediaQuery.textScalerOf(context);
-    final usableWidth = math.max(0.0, maxWidth - 12.0);
-
-    for (double size = initialFontSize; size >= minFontSize; size -= 0.5) {
-      final painter = TextPainter(
-        text: TextSpan(text: text, style: style.copyWith(fontSize: size)),
-        textAlign: TextAlign.center,
-        textDirection: textDirection,
-        textScaler: textScaler,
-        maxLines: maxLines,
-      )..layout(maxWidth: usableWidth);
-
-      if (!painter.didExceedMaxLines && painter.height <= maxHeight) {
-        return size;
-      }
-    }
-
-    return minFontSize;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (!constraints.hasBoundedWidth || constraints.maxWidth <= 0) {
-          return Text(text, style: style, textAlign: TextAlign.center);
-        }
-
-        return SizedBox(
-          width: constraints.maxWidth,
-          child: Text(
-            text,
-            style: style.copyWith(
-              fontSize: _fontSizeFor(context, constraints.maxWidth),
-            ),
-            textAlign: TextAlign.center,
-            softWrap: true,
-            maxLines: maxLines,
-            overflow: TextOverflow.clip,
-            textWidthBasis: TextWidthBasis.parent,
-          ),
-        );
-      },
-    );
-  }
-}
-
 class FlashcardScreen extends StatefulWidget {
   final bool showENasDefault;
   final VoidCallback onToggleDefault;
@@ -222,6 +159,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
   List<bool> gridCardENFace = List.filled(_cardsPerGridPage, true);
   List<WordEntry> allWords = [];
   List<WordEntry> currentSetWords = [];
+  final math.Random _batchShuffleRandom = math.Random();
   int currentIndex = 0;
   String selectedLevel = '';
   String selectedSublist = '';
@@ -253,10 +191,10 @@ class _FlashcardScreenState extends State<FlashcardScreen>
 
   // Add this to track loading state
   bool isLoading = true;
-  List<String> unwantedWords = [];
 
   // Add this to your class variables
   Map<String, String> enUkDictionary = {};
+  late final Future<void> _dictionaryReady;
   Map<String, String> englishContextSentences = {};
   List<String> allCustomListNames = [];
   List<WordEntry> _customEntries = []; // Cache for starred and custom words
@@ -280,6 +218,35 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     } catch (_) {}
   }
 
+  Future<bool> _requirePremium(String featureName) async {
+    if (BillingService().hasPremiumAccess) return true;
+
+    final unlocked = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => PremiumPaywallSheet(featureName: featureName),
+    );
+    return unlocked ?? BillingService().hasPremiumAccess;
+  }
+
+  Future<void> _openReader() async {
+    if (!await _requirePremium('Читалка')) return;
+    if (!mounted) return;
+
+    _playTapClick();
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => ReaderScreen(
+          darkTheme: darkTheme,
+          studyLang: studyLang,
+          nativeLang: nativeLang,
+        ),
+      ),
+    );
+    await loadWords();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -287,9 +254,8 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     WidgetsBinding.instance.addObserver(this);
     _loadSettings();
     loadWords();
-    _loadDictionary();
+    _dictionaryReady = _loadDictionary();
     _setupAudioSession();
-    _loadUnwantedWords();
     // Best-effort: some platforms may not support awaiting completion.
     flutterTts.awaitSpeakCompletion(true).catchError((_) {});
   }
@@ -375,137 +341,6 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     });
   }
 
-  Future<void> _loadUnwantedWords() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      unwantedWords = prefs.getStringList('unwanted_words') ?? [];
-    });
-  }
-
-  Future<void> _toggleUnwantedWord(String word) async {
-    final prefs = await SharedPreferences.getInstance();
-    final lowerWord = word.trim().toLowerCase();
-    setState(() {
-      if (unwantedWords.contains(lowerWord)) {
-        unwantedWords.remove(lowerWord);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Слово "$word" вилучено зі списку непотрібних слів.'),
-            duration: const Duration(seconds: 1),
-          ),
-        );
-      } else {
-        unwantedWords.add(lowerWord);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Слово "$word" додано до списку непотрібних слів.'),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
-    });
-    await prefs.setStringList('unwanted_words', unwantedWords);
-    print('VOLARY_UNWANTED_WORDS: $unwantedWords');
-  }
-
-  void _showUnwantedWordsDialog() {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            final textToCopy = unwantedWords.join('\n');
-            return AlertDialog(
-              backgroundColor:
-                  darkTheme ? const Color(0xFF1E2A3A) : Colors.white,
-              title: Text(
-                'Непотрібні слова (${unwantedWords.length})',
-                style:
-                    TextStyle(color: darkTheme ? Colors.white : Colors.black),
-              ),
-              content: SizedBox(
-                width: double.maxFinite,
-                child: unwantedWords.isEmpty
-                    ? Text(
-                        'Список порожній. Помічайте непотрібні слова значком кошика на картках.',
-                        style: TextStyle(
-                            color: darkTheme ? Colors.white70 : Colors.black87),
-                      )
-                    : Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Flexible(
-                            child: Container(
-                              constraints: const BoxConstraints(maxHeight: 300),
-                              decoration: BoxDecoration(
-                                border: Border.all(color: Colors.grey.shade400),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: ListView.builder(
-                                shrinkWrap: true,
-                                itemCount: unwantedWords.length,
-                                itemBuilder: (context, index) {
-                                  final word = unwantedWords[index];
-                                  return ListTile(
-                                    title: Text(
-                                      word,
-                                      style: TextStyle(
-                                          color: darkTheme
-                                              ? Colors.white
-                                              : Colors.black),
-                                    ),
-                                    trailing: IconButton(
-                                      icon: const Icon(Icons.close,
-                                          color: Colors.red),
-                                      onPressed: () {
-                                        setState(() {
-                                          unwantedWords.remove(word);
-                                        });
-                                        setDialogState(() {});
-                                        SharedPreferences.getInstance()
-                                            .then((prefs) {
-                                          prefs.setStringList(
-                                              'unwanted_words', unwantedWords);
-                                        });
-                                      },
-                                    ),
-                                  );
-                                },
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          ElevatedButton.icon(
-                            onPressed: () {
-                              Clipboard.setData(
-                                  ClipboardData(text: textToCopy));
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                      'Список скопійовано в буфер обміну!'),
-                                  duration: Duration(seconds: 1),
-                                ),
-                              );
-                            },
-                            icon: const Icon(Icons.copy),
-                            label: const Text('Скопіювати список'),
-                          ),
-                        ],
-                      ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Закрити'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
   static const Map<String, Map<String, String>> _uiStrings = {
     'en': {
       'cards': 'Cards',
@@ -526,7 +361,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       'legal': 'legal',
       'privacy_policy': 'Privacy Policy',
       'terms_of_use': 'Terms of Use',
-      'repeat_list': 'Repeat list',
+      'repeat_list': 'repeat list',
       'play_once': 'In order',
       'off': 'off',
       'min': 'min',
@@ -995,8 +830,9 @@ class _FlashcardScreenState extends State<FlashcardScreen>
               primary.trim().toLowerCase().replaceAll(RegExp(r's+'), ' ');
           final normalizedSecondary =
               secondary.toLowerCase().replaceAll(RegExp(r's+'), ' ');
-          if (secondary.isEmpty || normalizedPrimary == normalizedSecondary)
+          if (secondary.isEmpty || normalizedPrimary == normalizedSecondary) {
             return '';
+          }
           if (RegExp(r'[⺀-鿿]').hasMatch(secondary)) return '';
           return secondary;
         }
@@ -1104,20 +940,59 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     debugPrint('Words in current list: ${currentSetWords.length}');
   }
 
+  String _wordPrefix(WordEntry entry) {
+    final word = entry.wordMain.trim().toLowerCase();
+    return word.length <= 2 ? word : word.substring(0, 2);
+  }
+
+  List<WordEntry> _shuffleBatch(List<WordEntry> words) {
+    final groups = <String, List<WordEntry>>{};
+    for (final word in words) {
+      groups.putIfAbsent(_wordPrefix(word), () => []).add(word);
+    }
+    for (final group in groups.values) {
+      group.shuffle(_batchShuffleRandom);
+    }
+
+    final shuffled = <WordEntry>[];
+    String? previousPrefix;
+    while (groups.isNotEmpty) {
+      final candidates =
+          groups.entries.where((group) => group.key != previousPrefix).toList();
+      final pool = candidates.isEmpty ? groups.entries.toList() : candidates;
+      final largestGroupSize =
+          pool.map((group) => group.value.length).reduce(math.max);
+      final largestGroups = pool
+          .where((group) => group.value.length == largestGroupSize)
+          .toList();
+      final selected =
+          largestGroups[_batchShuffleRandom.nextInt(largestGroups.length)];
+
+      shuffled.add(selected.value.removeLast());
+      previousPrefix = selected.key;
+      if (selected.value.isEmpty) {
+        groups.remove(selected.key);
+      }
+    }
+
+    return shuffled;
+  }
+
   void filterCurrentSet() {
-    currentSetWords = allWords
+    final batchWords = allWords
         .where((w) =>
             w.level.trim().toLowerCase() ==
                 selectedLevel.trim().toLowerCase() &&
             w.sublist.trim().toLowerCase() ==
                 selectedSublist.trim().toLowerCase())
         .toList();
+    currentSetWords = _shuffleBatch(batchWords);
     currentIndex = 0;
     gridPage = 0;
     gridCardENFace = List.filled(_cardsPerGridPage, showENFace);
     setState(() {});
     debugPrint(
-        'Filtering for "$selectedLevel / $selectedSublist", found ${currentSetWords.length} words');
+        'Filtering for "$selectedLevel / $selectedSublist", shuffled ${currentSetWords.length} words');
   }
 
   void changeSet(String newSet) {
@@ -1168,23 +1043,47 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     await _deactivateAudioSession();
   }
 
-  void nextGridPage() {
+  void _nextSingleCard() {
+    final next = nextCardPage(
+        currentIndex: currentIndex,
+        wordCount: currentSetWords.length,
+        pageSize: 1);
     setState(() {
-      final int maxPage =
-          (currentSetWords.length / _cardsPerGridPage).ceil() - 1;
-      if (maxPage <= 0) {
-        gridPage = 0;
-      } else if (gridPage >= maxPage) {
-        gridPage = 0;
-        if (!BillingService().isPremium) {
-          AdHelper.showInterstitialAd(onAdClosed: () {});
-        }
-      } else {
-        gridPage++;
+      currentIndex = next.index;
+      showENFace = widget.showENasDefault;
+    });
+    if (shouldRequestSetCompletionAd(
+        finishedSet: next.finishedSet,
+        hasPremiumAccess: BillingService().hasPremiumAccess)) {
+      AdHelper.showInterstitialAd(onAdClosed: () {});
+    }
+  }
+
+  void _previousSingleCard() {
+    setState(() {
+      if (currentSetWords.isNotEmpty) {
+        currentIndex =
+            (currentIndex - 1 + currentSetWords.length) % currentSetWords.length;
       }
+      showENFace = widget.showENasDefault;
+    });
+  }
+
+  void nextGridPage() {
+    final next = nextCardPage(
+        currentIndex: gridPage,
+        wordCount: currentSetWords.length,
+        pageSize: _cardsPerGridPage);
+    setState(() {
+      gridPage = next.index;
       gridCardENFace =
           List.filled(_cardsPerGridPage, showENFace); // <-- use current default
     });
+    if (shouldRequestSetCompletionAd(
+        finishedSet: next.finishedSet,
+        hasPremiumAccess: BillingService().hasPremiumAccess)) {
+      AdHelper.showInterstitialAd(onAdClosed: () {});
+    }
   }
 
   void prevGridPage() {
@@ -1392,26 +1291,132 @@ class _FlashcardScreenState extends State<FlashcardScreen>
 
   Future<void> _loadDictionary() async {
     try {
-      // Load from the main CSV file instead of a separate dictionary
-      final rawData =
-          await rootBundle.loadString('assets/data/sets/combined_words.csv');
-      final csvTable = const CsvToListConverter().convert(rawData, eol: '\n');
-
-      // Create a map for fast lookups from the existing CSV data
-      for (var row in csvTable.skip(1)) {
-        if (row.length >= 4) {
-          String englishWord = row[2].toString().toLowerCase().trim();
-          String ukrainianWord = row[3].toString().trim();
-          if (englishWord.isNotEmpty && ukrainianWord.isNotEmpty) {
-            enUkDictionary[englishWord] = ukrainianWord;
-          }
+      final englishRaw = await rootBundle.loadString('assets/data/sets/en.csv');
+      final ukrainianRaw =
+          await rootBundle.loadString('assets/data/sets/uk.csv');
+      final english = const CsvToListConverter().convert(englishRaw);
+      final ukrainian = const CsvToListConverter().convert(ukrainianRaw);
+      if (english.length != ukrainian.length) {
+        throw FormatException('English and Ukrainian row counts differ: ${english.length} and ${ukrainian.length}');
+      }
+      final translations = <String, String>{};
+      for (var index = 1; index < english.length; index++) {
+        final source = english[index];
+        final target = ukrainian[index];
+        if (source.length < 3 || target.length < 3 ||
+            source[0].toString().trim() != target[0].toString().trim() ||
+            source[1].toString().trim() != target[1].toString().trim()) {
+          throw FormatException('Dictionary rows do not align at row $index');
+        }
+        final word = source[2].toString().toLowerCase().trim();
+        final translation = target[2].toString().trim();
+        if (word.isNotEmpty && translation.isNotEmpty) {
+          translations[word] = translation;
         }
       }
-      debugPrint(
-          'Dictionary loaded with ${enUkDictionary.length} entries from main CSV');
+      enUkDictionary = translations;
+      debugPrint('Dictionary loaded with ${translations.length} entries.');
     } catch (e) {
       debugPrint('Error loading dictionary from CSV: $e');
     }
+  }
+
+  List<String> _translationSegments(String translation) => translation
+      .split(';')
+      .map((segment) => segment.trim())
+      .where((segment) => segment.isNotEmpty)
+      .toList();
+
+  bool _hasAdditionalTranslations(String translation) =>
+      _translationSegments(translation).length > 1;
+
+  String _gridTranslation(String translation) {
+    final segments = _translationSegments(translation);
+    return segments.isEmpty ? translation.trim() : segments.first;
+  }
+
+  bool _needsExpandedSingleCard(String translation) =>
+      _hasAdditionalTranslations(translation) && translation.trim().length > 42;
+
+  Future<void> _showFullTranslationSheet(WordEntry entry) {
+    final translation = entry.trans1.trim();
+    final sheetBackground = darkTheme ? const Color(0xFF1E2A3A) : Colors.white;
+    final primaryText = darkTheme ? Colors.white : const Color(0xFF172033);
+    final secondaryText = darkTheme ? Colors.white70 : const Color(0xFF4B5563);
+
+    return showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: sheetBackground,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 10, 12, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 44,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: primaryText.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          entry.wordMain,
+                          style: TextStyle(
+                            color: primaryText,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Усі значення',
+                          style: TextStyle(
+                            color: secondaryText,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Закрити',
+                    onPressed: () => Navigator.of(sheetContext).pop(),
+                    icon: Icon(Icons.close, color: primaryText),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              SelectableText(
+                translation,
+                style: TextStyle(
+                  color: primaryText,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  height: 1.35,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -1437,13 +1442,19 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     final double topSafePadding = mediaQuery.padding.top;
     final double appBarTotalHeight = appBarHeight + topSafePadding;
     final double overlayPanelTop = appBarTotalHeight + 6.0;
+    final singleCardTranslation =
+        currentSetWords.isNotEmpty ? currentSetWords[currentIndex].trans1 : '';
+    final singleCardHasExpandedTranslation =
+        !showENFace && _needsExpandedSingleCard(singleCardTranslation);
 
     // Smaller cards for 10-word grid
     // Larger cards for single view
     final desiredCardWidth = math.max(safeWidth * 0.65, 170.0);
     final cardWidth = math.min(desiredCardWidth, safeWidth);
-    final cardHeight =
-        math.max(140.0, cardWidth * 0.52); // Increased height (+30%)
+    final cardHeight = math.max(
+      singleCardHasExpandedTranslation ? 180.0 : 140.0,
+      cardWidth * 0.52,
+    );
     const double singleCardGapHeight = 18.0;
     const double singleCardExamplesHeight = 56.0;
     final double singleCardSectionHeight =
@@ -1473,12 +1484,16 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     final entry =
         currentSetWords.isNotEmpty ? currentSetWords[currentIndex] : null;
     final groupedLists = getGroupedLists();
+    final singleCardMain = showENFace ? enWord : ukWord;
+    final singleCardIsSingleWord =
+        !RegExp(r'[\s;]').hasMatch(singleCardMain.trim());
 
     Widget centeredWordBlock({
       required String main,
       required TextStyle mainStyle,
       required bool compact,
       int mainMaxLines = 2,
+      bool preferSingleLine = false,
       String? secondary,
       TextStyle? secondaryStyle,
       List<String>? examples,
@@ -1493,21 +1508,40 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       final mainMaxHeight = compact ? 52.0 : 84.0;
       final secondaryMaxHeight = compact ? 24.0 : 34.0;
 
+      Widget mainText(double maxHeight) => AdaptiveCardText(
+            text: main,
+            style: mainStyle,
+            maxLines: mainMaxLines,
+            maxHeight: maxHeight,
+            minFontSize: compact ? 9 : 16,
+            preferSingleLine: preferSingleLine,
+          );
+
+      if (compact) {
+        return GridCardTextLayout(
+          mainBuilder: (maxHeight) =>
+              mainText(math.min(mainMaxHeight, maxHeight)),
+          secondaryBuilder: cleanedSecondary.isEmpty
+              ? null
+              : (maxHeight) => AdaptiveCardText(
+                    text: cleanedSecondary,
+                    style: secondaryStyle ?? mainStyle,
+                    maxHeight: math.min(secondaryMaxHeight, maxHeight),
+                    maxLines: 1,
+                    minFontSize: 10,
+                  ),
+        );
+      }
+
       return Column(
         mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _AdaptiveCardText(
-            text: main,
-            style: mainStyle,
-            maxLines: mainMaxLines,
-            maxHeight: mainMaxHeight,
-            minFontSize: compact ? 10 : 16,
-          ),
+          mainText(mainMaxHeight),
           if (cleanedSecondary.isNotEmpty) ...[
             const SizedBox(height: 3),
-            _AdaptiveCardText(
+            AdaptiveCardText(
               text: cleanedSecondary,
               style: secondaryStyle ?? mainStyle,
               maxHeight: secondaryMaxHeight,
@@ -1544,22 +1578,9 @@ class _FlashcardScreenState extends State<FlashcardScreen>
             onHorizontalDragEnd: (details) {
               if (details.primaryVelocity != null) {
                 if (details.primaryVelocity! < 0) {
-                  setState(() {
-                    if (currentSetWords.isNotEmpty) {
-                      currentIndex =
-                          (currentIndex + 1) % currentSetWords.length;
-                    }
-                    showENFace = widget.showENasDefault;
-                  });
+                  _nextSingleCard();
                 } else if (details.primaryVelocity! > 0) {
-                  setState(() {
-                    if (currentSetWords.isNotEmpty) {
-                      currentIndex =
-                          (currentIndex - 1 + currentSetWords.length) %
-                              currentSetWords.length;
-                    }
-                    showENFace = widget.showENasDefault;
-                  });
+                  _previousSingleCard();
                 }
               }
             },
@@ -1617,10 +1638,14 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                       ),
                       Center(
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 40.0),
+                          padding: const EdgeInsets.symmetric(horizontal: 60.0),
                           child: centeredWordBlock(
-                            main: showENFace ? enWord : ukWord,
+                            main: singleCardMain,
                             compact: false,
+                            mainMaxLines: showENFace
+                                ? 2
+                                : (singleCardHasExpandedTranslation ? 4 : 3),
+                            preferSingleLine: singleCardIsSingleWord,
                             mainStyle: TextStyle(
                               color: darkTheme
                                   ? Colors.white
@@ -1681,38 +1706,33 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                           ),
                         ),
                       ),
-                      Positioned(
-                        bottom: 12,
-                        right: 12,
-                        child: GestureDetector(
-                          onTap: () {
-                            _playTapClick();
-                            if (currentSetWords.isNotEmpty) {
-                              _toggleUnwantedWord(
-                                  currentSetWords[currentIndex].wordMain);
-                            }
-                          },
-                          child: _GlassIconSurface(
-                            size: 38,
-                            dark: darkTheme,
-                            child: Icon(
-                              unwantedWords
-                                      .contains(enWord.trim().toLowerCase())
-                                  ? Icons.delete
-                                  : Icons.delete_outline,
-                              color: unwantedWords
-                                      .contains(enWord.trim().toLowerCase())
-                                  ? (darkTheme
-                                      ? Colors.redAccent.shade100
-                                      : Colors.red)
-                                  : (darkTheme
+                      if (!showENFace && _hasAdditionalTranslations(ukWord))
+                        Positioned(
+                          bottom: 12,
+                          left: 12,
+                          child: Tooltip(
+                            message: 'Переглянути всі переклади',
+                            child: GestureDetector(
+                              onTap: () {
+                                _playTapClick();
+                                if (entry != null) {
+                                  unawaited(_showFullTranslationSheet(entry));
+                                }
+                              },
+                              child: _GlassIconSurface(
+                                size: 38,
+                                dark: darkTheme,
+                                child: Icon(
+                                  Icons.more_horiz,
+                                  color: darkTheme
                                       ? Colors.white.withValues(alpha: 0.92)
-                                      : const Color(0xFF25455F)),
-                              size: 22,
+                                      : const Color(0xFF25455F),
+                                  size: 24,
+                                ),
+                              ),
                             ),
                           ),
                         ),
-                      ),
                     ],
                   ),
                 ),
@@ -1770,8 +1790,8 @@ class _FlashcardScreenState extends State<FlashcardScreen>
             child: Stack(
               children: [
                 Positioned(
-                  top: 8,
-                  left: 8,
+                  top: 3,
+                  left: 3,
                   child: GestureDetector(
                     onTap: () {
                       _playTapClick();
@@ -1783,7 +1803,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                       }
                     },
                     child: _GlassIconSurface(
-                      size: 28,
+                      size: 26,
                       dark: darkTheme,
                       child: Icon(
                         selectedLevel == 'custom'
@@ -1796,63 +1816,83 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                             : (darkTheme
                                 ? Colors.white.withValues(alpha: 0.92)
                                 : const Color(0xFF25455F)),
-                        size: 18,
+                        size: 16,
                       ),
                     ),
                   ),
                 ),
-                Center(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: centeredWordBlock(
-                      main: isEN ? entry.wordMain : entry.trans1,
-                      compact: true,
-                      mainMaxLines: isEN ? 1 : 2,
-                      mainStyle: TextStyle(
-                        color: darkTheme
-                            ? Colors.white
-                            : (isEN
-                                ? const Color(0xFF102A43)
-                                : const Color(0xFF164C37)),
-                        fontFamily: 'Inter',
-                        fontWeight: FontWeight.w700,
-                        fontSize: 22, // +~20%
-                      ),
-                      secondary: isEN
-                          ? (entry.wordSyn.isNotEmpty
-                              ? '(${entry.wordSyn})'
-                              : '')
-                          : '',
-                      secondaryStyle: isEN
-                          ? TextStyle(
-                              color: darkTheme
-                                  ? Colors.white.withValues(alpha: 0.8)
-                                  : const Color(0xFF315B75),
-                              fontFamily: 'Inter',
-                              fontStyle: FontStyle.italic,
-                              fontSize: 14,
-                            )
-                          : TextStyle(
-                              color: darkTheme
-                                  ? Colors.white.withValues(alpha: 0.8)
-                                  : const Color(0xFF215A47),
-                              fontFamily: 'Inter',
-                              fontWeight: FontWeight.w600,
-                              fontSize: 18,
+                Positioned.fill(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final reserveSideControls = constraints.maxWidth >= 180;
+                      final textPadding = reserveSideControls
+                          ? const EdgeInsets.symmetric(horizontal: 40)
+                          : const EdgeInsets.fromLTRB(12, 40, 12, 4);
+                      final displayWord = isEN
+                          ? entry.wordMain
+                          : _gridTranslation(entry.trans1);
+                      final isSingleWord =
+                          !RegExp(r'\s').hasMatch(displayWord.trim());
+
+                      return Padding(
+                        padding: textPadding,
+                        child: Center(
+                          child: Transform.translate(
+                            offset: const Offset(0, -8),
+                            child: centeredWordBlock(
+                              main: displayWord,
+                              compact: true,
+                              mainMaxLines: isEN ? 1 : 2,
+                              preferSingleLine: isSingleWord,
+                              mainStyle: TextStyle(
+                                color: darkTheme
+                                    ? Colors.white
+                                    : (isEN
+                                        ? const Color(0xFF102A43)
+                                        : const Color(0xFF164C37)),
+                                fontFamily: 'Inter',
+                                fontWeight: FontWeight.w700,
+                                fontSize: 22, // +~20%
+                              ),
+                              secondary: isEN
+                                  ? (entry.wordSyn.isNotEmpty
+                                      ? '(${entry.wordSyn})'
+                                      : '')
+                                  : '',
+                              secondaryStyle: isEN
+                                  ? TextStyle(
+                                      color: darkTheme
+                                          ? Colors.white.withValues(alpha: 0.8)
+                                          : const Color(0xFF315B75),
+                                      fontFamily: 'Inter',
+                                      fontStyle: FontStyle.italic,
+                                      fontSize: 14,
+                                    )
+                                  : TextStyle(
+                                      color: darkTheme
+                                          ? Colors.white.withValues(alpha: 0.8)
+                                          : const Color(0xFF215A47),
+                                      fontFamily: 'Inter',
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 18,
+                                    ),
                             ),
-                    ),
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 ),
                 Positioned(
-                  top: 8,
-                  right: 8,
+                  top: 3,
+                  right: 3,
                   child: GestureDetector(
                     onTap: () {
                       _playTapClick();
                       speakWord(entry.wordMain);
                     },
                     child: _GlassIconSurface(
-                      size: 28,
+                      size: 26,
                       dark: darkTheme,
                       child: SvgPicture.asset(
                         'assets/icons/Speaker.svg',
@@ -1868,6 +1908,31 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                     ),
                   ),
                 ),
+                if (!isEN && _hasAdditionalTranslations(entry.trans1))
+                  Positioned(
+                    bottom: 2,
+                    right: 2,
+                    child: Tooltip(
+                      message: 'Переглянути всі переклади',
+                      child: GestureDetector(
+                        onTap: () {
+                          _playTapClick();
+                          unawaited(_showFullTranslationSheet(entry));
+                        },
+                        child: _GlassIconSurface(
+                          size: 24,
+                          dark: darkTheme,
+                          child: Icon(
+                            Icons.more_horiz,
+                            color: darkTheme
+                                ? Colors.white.withValues(alpha: 0.92)
+                                : const Color(0xFF25455F),
+                            size: 18,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -1957,14 +2022,11 @@ class _FlashcardScreenState extends State<FlashcardScreen>
           return GestureDetector(
             onHorizontalDragEnd: (details) {
               if (details.primaryVelocity != null) {
-                setState(() {
-                  if (details.primaryVelocity! < 0) {
-                    nextGridPage();
-                  } else if (details.primaryVelocity! > 0) {
-                    prevGridPage();
-                  }
-                  gridCardENFace = List.filled(_cardsPerGridPage, showENFace);
-                });
+                if (details.primaryVelocity! < 0) {
+                  nextGridPage();
+                } else if (details.primaryVelocity! > 0) {
+                  prevGridPage();
+                }
               }
             },
             child: Padding(
@@ -2696,25 +2758,6 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                                               activeSettingsPanel == 'legal',
                                           onTap: () => togglePanel('legal'),
                                         ),
-                                        settingsTile(
-                                          icon: Icon(
-                                            Icons.delete_sweep_outlined,
-                                            size: 26,
-                                            color: tileIconColor(
-                                                unwantedWords.isNotEmpty),
-                                          ),
-                                          label:
-                                              '\u041D\u0435\u043F\u043E\u0442\u0440\u0456\u0431\u043D\u0456 \u0441\u043B\u043E\u0432\u0430',
-                                          subLabel: unwantedWords.isEmpty
-                                              ? '\u0441\u043F\u0438\u0441\u043E\u043A \u043F\u043E\u0440\u043E\u0436\u043D\u0456\u0439'
-                                              : '${unwantedWords.length} \u0441\u043B\u0456\u0432',
-                                          enabled: unwantedWords.isNotEmpty,
-                                          onTap: () {
-                                            setState(
-                                                () => showSettingsMenu = false);
-                                            _showUnwantedWordsDialog();
-                                          },
-                                        ),
                                       ],
                                     );
                                   },
@@ -2800,30 +2843,9 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                             onHorizontalDragEnd: (details) {
                               if (details.primaryVelocity != null) {
                                 if (details.primaryVelocity! < 0) {
-                                  setState(() {
-                                    if (currentSetWords.isNotEmpty) {
-                                      if (currentIndex + 1 ==
-                                          currentSetWords.length) {
-                                        if (!BillingService().isPremium) {
-                                          AdHelper.showInterstitialAd(
-                                              onAdClosed: () {});
-                                        }
-                                      }
-                                      currentIndex = (currentIndex + 1) %
-                                          currentSetWords.length;
-                                    }
-                                    showENFace = widget.showENasDefault;
-                                  });
+                                  _nextSingleCard();
                                 } else if (details.primaryVelocity! > 0) {
-                                  setState(() {
-                                    if (currentSetWords.isNotEmpty) {
-                                      currentIndex = (currentIndex -
-                                              1 +
-                                              currentSetWords.length) %
-                                          currentSetWords.length;
-                                    }
-                                    showENFace = widget.showENasDefault;
-                                  });
+                                  _previousSingleCard();
                                 }
                               }
                             },
@@ -2896,19 +2918,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                             Tooltip(
                               message: 'Reader',
                               child: GestureDetector(
-                                onTap: () async {
-                                  _playTapClick();
-                                  await Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (context) => ReaderScreen(
-                                        darkTheme: darkTheme,
-                                        studyLang: studyLang,
-                                        nativeLang: nativeLang,
-                                      ),
-                                    ),
-                                  );
-                                  await loadWords();
-                                },
+                                onTap: _openReader,
                                 child: const _GlassIconSurface(
                                   size: 44,
                                   dark: true,
@@ -3077,8 +3087,11 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                             child: Tooltip(
                               message: isPlaying ? 'Stop playback' : 'Play set',
                               child: bottomAction(
-                                onTap: () {
+                                onTap: () async {
                                   if (!isPlaying) {
+                                    if (!await _requirePremium('Автоплей')) {
+                                      return;
+                                    }
                                     playSetWords();
                                   } else {
                                     stopPlaying();
@@ -4155,27 +4168,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
   }
 
   Future<void> loadDictionary() async {
-    try {
-      // Load from the main CSV file instead of a separate dictionary
-      final rawData =
-          await rootBundle.loadString('assets/data/sets/combined_words.csv');
-      final csvTable = const CsvToListConverter().convert(rawData, eol: '\n');
-
-      // Create a map for fast lookups from the existing CSV data
-      for (var row in csvTable.skip(1)) {
-        if (row.length >= 4) {
-          String englishWord = row[2].toString().toLowerCase().trim();
-          String ukrainianWord = row[3].toString().trim();
-          if (englishWord.isNotEmpty && ukrainianWord.isNotEmpty) {
-            enUkDictionary[englishWord] = ukrainianWord;
-          }
-        }
-      }
-      debugPrint(
-          'Dictionary loaded with ${enUkDictionary.length} entries from main CSV');
-    } catch (e) {
-      debugPrint('Error loading dictionary from CSV: $e');
-    }
+    await _dictionaryReady;
   }
 
 // Enhanced translation function with better fallback
@@ -4194,6 +4187,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     if (from == to) return cleaned;
 
     if (from == 'en' && to == 'uk') {
+      await _dictionaryReady;
       final local = enUkDictionary[cleaned.toLowerCase()];
       if (local != null && local.isNotEmpty) return local;
     }

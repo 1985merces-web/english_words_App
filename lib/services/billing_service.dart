@@ -1,95 +1,178 @@
 import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+enum PremiumAccess { free, trial, lifetime }
+
+enum BillingActionResult {
+  started,
+  storeUnavailable,
+  productUnavailable,
+  failed
+}
 
 class BillingService extends ChangeNotifier {
   static final BillingService _instance = BillingService._internal();
   factory BillingService() => _instance;
   BillingService._internal();
 
-  final InAppPurchase _iap = InAppPurchase.instance;
-  late StreamSubscription<List<PurchaseDetails>> _subscription;
-  
-  bool _isPremium = false;
-  bool get isPremium => _isPremium;
+  static const premiumLifetimeProductId = 'volary_premium_lifetime';
+  static const _legacyPremiumProductId = 'remove_ads';
+  static const _premiumKey = 'premium_lifetime';
+  static const _legacyPremiumKey = 'isPremium';
+  static const _trialStartedAtKey = 'premium_trial_started_at';
+  static const premiumTrialDuration = Duration(days: 1);
 
-  final String _removeAdsProductId = 'remove_ads'; // Replace with real ID later
+  final InAppPurchase _iap = InAppPurchase.instance;
+  StreamSubscription<List<PurchaseDetails>>? _subscription;
+
+  bool _hasLifetimePremium = false;
+  DateTime? _trialStartedAt;
+  bool _initialized = false;
+
+  bool get isInitialized => _initialized;
+  bool get hasLifetimePremium => _hasLifetimePremium;
+  bool get isTrialActive =>
+      !_hasLifetimePremium &&
+      _trialStartedAt != null &&
+      DateTime.now().isBefore(_trialStartedAt!.add(premiumTrialDuration));
+  bool get hasPremiumAccess => _hasLifetimePremium || isTrialActive;
+  PremiumAccess get access {
+    if (_hasLifetimePremium) return PremiumAccess.lifetime;
+    if (isTrialActive) return PremiumAccess.trial;
+    return PremiumAccess.free;
+  }
+
+  Duration get trialRemaining {
+    if (!isTrialActive) return Duration.zero;
+    final remaining =
+        _trialStartedAt!.add(premiumTrialDuration).difference(DateTime.now());
+    return remaining.isNegative ? Duration.zero : remaining;
+  }
 
   Future<void> init() async {
+    if (_initialized) return;
+
     final prefs = await SharedPreferences.getInstance();
-    _isPremium = prefs.getBool('isPremium') ?? false;
+    _hasLifetimePremium =
+        prefs.getBool(_premiumKey) ?? prefs.getBool(_legacyPremiumKey) ?? false;
 
-    final purchaseUpdated = _iap.purchaseStream;
-    _subscription = purchaseUpdated.listen((purchaseDetailsList) {
-      _listenToPurchaseUpdated(purchaseDetailsList);
-    }, onDone: () {
-      _subscription.cancel();
-    }, onError: (error) {
-      debugPrint("Purchase stream error: $error");
-    });
-    
-    // Attempt to restore purchases if available
+    final storedTrialStart = prefs.getString(_trialStartedAtKey);
+    _trialStartedAt = storedTrialStart == null
+        ? DateTime.now()
+        : DateTime.tryParse(storedTrialStart) ?? DateTime.now();
+    if (storedTrialStart == null) {
+      await prefs.setString(
+          _trialStartedAtKey, _trialStartedAt!.toIso8601String());
+    }
+
+    _subscription = _iap.purchaseStream.listen(
+      _listenToPurchaseUpdated,
+      onDone: () => _subscription?.cancel(),
+      onError: (Object error) => debugPrint('Purchase stream error: $error'),
+    );
+
+    _initialized = true;
+    notifyListeners();
+
+    unawaited(_restoreSilently());
+  }
+
+  Future<ProductDetails?> loadPremiumProduct() async {
     try {
-        await _iap.restorePurchases();
-    } catch(e) {
-        debugPrint("Restore purchases error: $e");
+      final available = await _iap.isAvailable();
+      if (!available) return null;
+
+      final response =
+          await _iap.queryProductDetails({premiumLifetimeProductId});
+      if (response.error != null || response.productDetails.isEmpty) {
+        return null;
+      }
+      return response.productDetails.first;
+    } catch (error) {
+      debugPrint('Premium product query failed: $error');
+      return null;
     }
   }
 
-  Future<void> buyRemoveAds() async {
-    final bool available = await _iap.isAvailable();
-    if (!available) {
-      debugPrint("Store not available");
-      return;
-    }
+  Future<BillingActionResult> buyPremiumLifetime() async {
+    try {
+      final product = await loadPremiumProduct();
+      if (product == null) {
+        final available = await _iap.isAvailable();
+        return available
+            ? BillingActionResult.productUnavailable
+            : BillingActionResult.storeUnavailable;
+      }
 
-    final ProductDetailsResponse response = await _iap.queryProductDetails({_removeAdsProductId});
-    if (response.notFoundIDs.isNotEmpty) {
-      debugPrint("Product not found: ${response.notFoundIDs}");
-      return;
+      await _iap.buyNonConsumable(
+        purchaseParam: PurchaseParam(productDetails: product),
+      );
+      return BillingActionResult.started;
+    } catch (error) {
+      debugPrint('Premium purchase start failed: $error');
+      return BillingActionResult.failed;
     }
-
-    final ProductDetails productDetails = response.productDetails.first;
-    final PurchaseParam purchaseParam = PurchaseParam(productDetails: productDetails);
-    
-    await _iap.buyNonConsumable(purchaseParam: purchaseParam);
   }
 
-  Future<void> restorePurchases() async {
-    await _iap.restorePurchases();
+  Future<BillingActionResult> restorePurchases() async {
+    try {
+      final available = await _iap.isAvailable();
+      if (!available) return BillingActionResult.storeUnavailable;
+      await _iap.restorePurchases();
+      return BillingActionResult.started;
+    } catch (error) {
+      debugPrint('Restore purchases error: $error');
+      return BillingActionResult.failed;
+    }
   }
 
-  void _listenToPurchaseUpdated(List<PurchaseDetails> purchaseDetailsList) async {
-    for (var purchaseDetails in purchaseDetailsList) {
+  Future<void> _restoreSilently() async {
+    try {
+      await _iap.restorePurchases();
+    } catch (error) {
+      debugPrint('Restore purchases error: $error');
+    }
+  }
+
+  Future<void> _listenToPurchaseUpdated(
+    List<PurchaseDetails> purchaseDetailsList,
+  ) async {
+    for (final purchaseDetails in purchaseDetailsList) {
       if (purchaseDetails.status == PurchaseStatus.pending) {
-        debugPrint("Purchase pending...");
-      } else {
-        if (purchaseDetails.status == PurchaseStatus.error) {
-          debugPrint("Purchase error: ${purchaseDetails.error}");
-        } else if (purchaseDetails.status == PurchaseStatus.purchased ||
-                   purchaseDetails.status == PurchaseStatus.restored) {
-          if (purchaseDetails.productID == _removeAdsProductId) {
-            _setPremium(true);
-          }
+        continue;
+      }
+
+      if (purchaseDetails.status == PurchaseStatus.purchased ||
+          purchaseDetails.status == PurchaseStatus.restored) {
+        if (purchaseDetails.productID == premiumLifetimeProductId ||
+            purchaseDetails.productID == _legacyPremiumProductId) {
+          // Server-side verification will replace this local cache before release.
+          await _setLifetimePremium(true);
         }
-        if (purchaseDetails.pendingCompletePurchase) {
-          await _iap.completePurchase(purchaseDetails);
-        }
+      } else if (purchaseDetails.status == PurchaseStatus.error) {
+        debugPrint('Purchase error: ${purchaseDetails.error}');
+      }
+
+      if (purchaseDetails.pendingCompletePurchase) {
+        await _iap.completePurchase(purchaseDetails);
       }
     }
   }
 
-  Future<void> _setPremium(bool value) async {
-    _isPremium = value;
+  Future<void> _setLifetimePremium(bool value) async {
+    _hasLifetimePremium = value;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('isPremium', value);
+    await prefs.setBool(_premiumKey, value);
+    await prefs.remove(_legacyPremiumKey);
     notifyListeners();
   }
 
   @override
   void dispose() {
-    _subscription.cancel();
+    _subscription?.cancel();
     super.dispose();
   }
 }
