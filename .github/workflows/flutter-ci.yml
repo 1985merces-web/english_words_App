@@ -17,8 +17,8 @@ jobs:
             ${{ runner.os }}-pub-
       - uses: subosito/flutter-action@v2
         with:
-          # google_mobile_ads 7.x requires Dart 3.6 or later.
-          flutter-version: '3.27.0'
+          # google_mobile_ads 7.x requires Dart 3.9 or later.
+          flutter-version: '3.35.1'
           channel: stable
       - run: flutter pub get
       # The vendored Billing plugin has its own package-level test dependencies.
