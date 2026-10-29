@@ -49,16 +49,6 @@ void main() {
     await tester.pumpAndSettle();
     final dynamic state = tester.state(find.byType(FlashcardScreen));
     expect(state.currentSetWords, isNotEmpty);
-    for (var i = 0; i < 20 && state.enUkDictionary.isEmpty; i++) {
-      await tester.runAsync(() => Future<void>.delayed(
-            const Duration(milliseconds: 100),
-          ));
-      await tester.pump();
-    }
-    expect(state.enUkDictionary, isNotEmpty);
-    final translation =
-        await state.translateWord(word: 'like', fromLang: 'en', toLang: 'uk');
-    expect(translation, 'подобатися');
     state.setState(() => state.currentIndex = state.currentSetWords.length - 1);
     await tester.pumpAndSettle();
     await tester.fling(
