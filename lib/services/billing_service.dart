@@ -1,8 +1,12 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'ad_helper.dart';
+import 'purchase_verifier.dart';
 
 enum PremiumAccess { free, trial, lifetime }
 
@@ -25,7 +29,12 @@ class BillingService extends ChangeNotifier {
   static const _trialStartedAtKey = 'premium_trial_started_at';
   static const premiumTrialDuration = Duration(days: 1);
 
-  final InAppPurchase _iap = InAppPurchase.instance;
+  @visibleForTesting
+  static InAppPurchase? debugIapOverride;
+
+  InAppPurchase? _iapInstance;
+  InAppPurchase get _iap =>
+      debugIapOverride ?? (_iapInstance ??= InAppPurchase.instance);
   StreamSubscription<List<PurchaseDetails>>? _subscription;
 
   bool _hasLifetimePremium = false;
@@ -52,6 +61,17 @@ class BillingService extends ChangeNotifier {
     return remaining.isNegative ? Duration.zero : remaining;
   }
 
+  @visibleForTesting
+  static void resetForTesting() {
+    _instance._initialized = false;
+    _instance._hasLifetimePremium = false;
+    _instance._trialStartedAt = null;
+    _instance._subscription?.cancel();
+    _instance._subscription = null;
+    _instance._iapInstance = null;
+    debugIapOverride = null;
+  }
+
   Future<void> init() async {
     if (_initialized) return;
 
@@ -68,19 +88,24 @@ class BillingService extends ChangeNotifier {
           _trialStartedAtKey, _trialStartedAt!.toIso8601String());
     }
 
-    _subscription = _iap.purchaseStream.listen(
-      _listenToPurchaseUpdated,
-      onDone: () => _subscription?.cancel(),
-      onError: (Object error) => debugPrint('Purchase stream error: $error'),
-    );
+    if (!Platform.environment.containsKey('FLUTTER_TEST')) {
+      _subscription = _iap.purchaseStream.listen(
+        _listenToPurchaseUpdated,
+        onDone: () => _subscription?.cancel(),
+        onError: (Object error) => debugPrint('Purchase stream error: $error'),
+      );
+      unawaited(_restoreSilently());
+    }
 
     _initialized = true;
     notifyListeners();
-
-    unawaited(_restoreSilently());
   }
 
   Future<ProductDetails?> loadPremiumProduct() async {
+    if (debugIapOverride == null &&
+        Platform.environment.containsKey('FLUTTER_TEST')) {
+      return null;
+    }
     try {
       final available = await _iap.isAvailable();
       if (!available) return null;
@@ -98,6 +123,10 @@ class BillingService extends ChangeNotifier {
   }
 
   Future<BillingActionResult> buyPremiumLifetime() async {
+    if (debugIapOverride == null &&
+        Platform.environment.containsKey('FLUTTER_TEST')) {
+      return BillingActionResult.productUnavailable;
+    }
     try {
       final product = await loadPremiumProduct();
       if (product == null) {
@@ -118,6 +147,10 @@ class BillingService extends ChangeNotifier {
   }
 
   Future<BillingActionResult> restorePurchases() async {
+    if (debugIapOverride == null &&
+        Platform.environment.containsKey('FLUTTER_TEST')) {
+      return BillingActionResult.storeUnavailable;
+    }
     try {
       final available = await _iap.isAvailable();
       if (!available) return BillingActionResult.storeUnavailable;
@@ -131,6 +164,8 @@ class BillingService extends ChangeNotifier {
 
   Future<void> _restoreSilently() async {
     try {
+      final available = await _iap.isAvailable();
+      if (!available) return;
       await _iap.restorePurchases();
     } catch (error) {
       debugPrint('Restore purchases error: $error');
@@ -149,8 +184,28 @@ class BillingService extends ChangeNotifier {
           purchaseDetails.status == PurchaseStatus.restored) {
         if (purchaseDetails.productID == premiumLifetimeProductId ||
             purchaseDetails.productID == _legacyPremiumProductId) {
-          // Server-side verification will replace this local cache before release.
-          await _setLifetimePremium(true);
+          final token =
+              purchaseDetails.verificationData.serverVerificationData;
+          final verification = await PurchaseVerifier.instance.verify(
+            packageName: 'com.mrcsglobal.volary',
+            productId: purchaseDetails.productID,
+            purchaseToken: token,
+          );
+
+          if (verification.isEntitled) {
+            await _setLifetimePremium(
+              true,
+              orderId: verification.orderId,
+              signature: verification.signature,
+            );
+            if (purchaseDetails.pendingCompletePurchase) {
+              await _iap.completePurchase(purchaseDetails);
+            }
+          } else {
+            debugPrint(
+                '[Billing] Purchase verification rejected: ${verification.errorMessage}');
+          }
+          continue;
         }
       } else if (purchaseDetails.status == PurchaseStatus.error) {
         debugPrint('Purchase error: ${purchaseDetails.error}');
@@ -162,11 +217,26 @@ class BillingService extends ChangeNotifier {
     }
   }
 
-  Future<void> _setLifetimePremium(bool value) async {
+  Future<void> _setLifetimePremium(
+    bool value, {
+    String? orderId,
+    String? signature,
+  }) async {
     _hasLifetimePremium = value;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_premiumKey, value);
     await prefs.remove(_legacyPremiumKey);
+    if (orderId != null) {
+      await prefs.setString('premium_order_id', orderId);
+    }
+    if (signature != null) {
+      await prefs.setString('premium_signature', signature);
+    }
+    if (value) {
+      await prefs.setString(
+          'premium_verified_at', DateTime.now().toIso8601String());
+      AdHelper.disableAds();
+    }
     notifyListeners();
   }
 

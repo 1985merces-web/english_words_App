@@ -56,8 +56,12 @@
         margin: 14px 0;
       }
       h2 {
-        margin: 18px 0 8px;
-        font-size: 18px;
+        margin: 22px 0 8px;
+        font-size: 19px;
+      }
+      h3 {
+        margin: 14px 0 6px;
+        font-size: 16px;
       }
       a {
         color: var(--accent);
@@ -72,91 +76,134 @@
       }
       ul {
         margin: 8px 0 0;
-        padding-left: 18px;
+        padding-left: 20px;
+      }
+      li {
+        margin-bottom: 6px;
       }
     </style>
   </head>
   <body>
     <header>
       <h1>Privacy Policy</h1>
-      <p class="muted">Effective date: <code>2026-01-06</code></p>
+      <p class="muted">Effective date: <code>2026-10-20</code></p>
     </header>
 
     <main>
       <div class="card">
         <p>
-          This Privacy Policy explains what data the App processes, why it is processed, and what
-          choices you have.
+          This Privacy Policy explains how <strong>Volary</strong> (the &ldquo;App&rdquo;), developed and operated by
+          <strong>MRCS Global O&Uuml;</strong> (&ldquo;we&rdquo;, &ldquo;us&rdquo;, or &ldquo;our&rdquo;), processes data,
+          how third-party services operate within the App, and what rights and choices you have.
         </p>
       </div>
 
-      <h2>Summary</h2>
+      <h2>1. Summary</h2>
       <ul>
-        <li>The App works offline using built-in word lists.</li>
-        <li>The App stores your settings and custom lists locally on your device.</li>
-        <li>The App does not collect or sell personal data.</li>
+        <li><strong>Offline-First Learning:</strong> Core vocabulary flashcards, study lists, and bundled classic literature operate locally on your device without requiring an account.</li>
+        <li><strong>On-Device Storage:</strong> Your study progress, custom word lists, and interface preferences remain stored locally on your device.</li>
+        <li><strong>No Personal Data Sale:</strong> We do not sell, rent, or trade your personal information.</li>
+        <li><strong>Third-Party Integrations:</strong> To deliver in-app advertisements, in-app purchases, and optional online dictionary translations, the App integrates vetted services provided by Google LLC.</li>
+        <li><strong>Ad-Free Option:</strong> Upgrading to Volary Premium removes all in-app advertising and halts ad-network data collection.</li>
       </ul>
 
-      <h2>Data the App processes</h2>
+      <h2>2. Information Stored Locally on Your Device</h2>
       <div class="card">
         <ul>
-          <li><strong>App settings</strong> (e.g., selected Study/Native language, app preferences). Stored locally.</li>
-          <li><strong>Custom lists</strong> (words you enter). Stored locally.</li>
-          <li><strong>Playback actions</strong> (text-to-speech). Processed on-device via your operating system's TTS engine.</li>
+          <li><strong>App Preferences:</strong> Selected study and native languages, theme modes (light/dark), sound settings, and interface language choices.</li>
+          <li><strong>Study Lists &amp; Custom Cards:</strong> Words you save, custom lists you create, and local reading bookmark positions in reader books.</li>
+          <li><strong>Local Purchase &amp; Trial State:</strong> Entitlement flags (lifetime premium status and 24-hour trial timestamps) stored locally via platform secure storage / preferences.</li>
+          <li><strong>Speech Synthesis:</strong> Text-to-speech pronunciation is generated on-device via your operating system&rsquo;s built-in TTS engine. Audio is not recorded or sent to remote servers.</li>
         </ul>
       </div>
 
-      <h2>How we use data</h2>
-      <div class="card">
-        <ul>
-          <li>To provide core learning functionality (show cards, lists, and progress in the session).</li>
-          <li>To remember your preferences and custom lists (stored on-device).</li>
-        </ul>
-      </div>
-
-      <h2>Data storage and retention</h2>
-      <div class="card">
-        <ul>
-          <li><strong>On-device storage:</strong> The App stores settings and custom lists on your device.</li>
-          <li><strong>Retention:</strong> Data remains until you delete it in the App or uninstall the App.</li>
-        </ul>
-      </div>
-
-      <h2>Sharing</h2>
-      <div class="card">
-        <p>We do not share your data with third parties.</p>
-      </div>
-
-      <h2>Children's privacy</h2>
+      <h2>3. Third-Party Services and Data Collection</h2>
       <div class="card">
         <p>
-          The App is a general-audience educational tool. It does not knowingly collect personal
-          information from children. If you believe a child has provided personal information,
-          contact us and we will address it.
+          The App does not require user registration or account creation. However, the following third-party software development kits (SDKs) and APIs are used:
+        </p>
+
+        <h3>A. Advertising &amp; Consent (Google AdMob &amp; Google UMP SDK)</h3>
+        <p>
+          For users of the free tier, the App displays interstitial advertisements powered by <strong>Google AdMob</strong>.
+          Before loading ads, the <strong>Google User Messaging Platform (UMP)</strong> presents a consent dialog to users in the European Economic Area (EEA), the United Kingdom, and Switzerland in accordance with the GDPR and IAB TCF framework.
+        </p>
+        <ul>
+          <li><strong>Data Processed:</strong> Google Advertising ID (AAID), IP address (used to infer coarse/country-level location and regulatory jurisdiction), ad interaction events, and diagnostic/performance metrics.</li>
+          <li><strong>Consent Management:</strong> You can review or modify your privacy and advertising choices at any time inside the App via <strong>Settings &gt; Ad Privacy Settings</strong> (Privacidad de anuncios / Налаштування реклами).</li>
+          <li><strong>Premium Exemption:</strong> When Volary Premium is active, all ad requests are completely disabled, and the AdMob SDK is not invoked.</li>
+          <li><strong>Google Privacy Policy:</strong> <a href="https://policies.google.com/technologies/ads" target="_blank" rel="noopener">https://policies.google.com/technologies/ads</a></li>
+        </ul>
+
+        <h3>B. In-App Purchases (Google Play Billing)</h3>
+        <p>
+          If you purchase Volary Premium, transactions are handled exclusively by <strong>Google Play In-App Billing</strong>.
+        </p>
+        <ul>
+          <li><strong>Data Processed:</strong> Google Play order identifiers, purchase tokens, product IDs, and transaction timestamps.</li>
+          <li><strong>Payment Details:</strong> We do not collect, view, or store payment card numbers, banking details, or billing addresses; all financial details are securely processed by Google LLC.</li>
+          <li><strong>Verification:</strong> Purchase tokens may be checked against Google Play Developer APIs to validate purchase authenticity and prevent fraud.</li>
+        </ul>
+
+        <h3>C. Online Word Lookup (Google Translate Service)</h3>
+        <p>
+          When reading books or documents in the Reader feature, if a word or phrase is not present in the local bundled offline dictionary, the App queries Google Translate over an encrypted HTTPS connection to fetch the translation.
+        </p>
+        <ul>
+          <li><strong>Data Transmitted:</strong> Only the isolated word/phrase query and the requested language pair. No user identifier or account data is attached.</li>
+          <li><strong>Local Caching:</strong> Retrieved translations are cached temporarily on your device to minimize duplicate network requests.</li>
+        </ul>
+      </div>
+
+      <h2>4. Legal Grounds for Processing (GDPR / EEA &amp; UK Users)</h2>
+      <div class="card">
+        <ul>
+          <li><strong>Consent:</strong> For personalized advertising and device identifier access via the Google UMP consent dialog. You may withdraw consent at any time in the App settings.</li>
+          <li><strong>Contractual Performance:</strong> To deliver core educational functionality and fulfill in-app premium purchases requested by you.</li>
+          <li><strong>Legitimate Interests:</strong> To detect fraud, protect application integrity, and maintain reliable service delivery.</li>
+        </ul>
+      </div>
+
+      <h2>5. Data Retention &amp; Deletion</h2>
+      <div class="card">
+        <ul>
+          <li><strong>Local Data:</strong> All local study lists, bookmarks, and preferences persist on your device until you delete them within the App or uninstall the App. Clearing the App&rsquo;s data in your Android system settings also erases all local data.</li>
+          <li><strong>Diagnostic Data:</strong> Crash logs or anonymous telemetry collected by Google Play or AdMob are retained in accordance with Google&rsquo;s standard retention schedules (typically 14 to 90 days).</li>
+        </ul>
+      </div>
+
+      <h2>6. Children&rsquo;s Privacy</h2>
+      <div class="card">
+        <p>
+          The App is designed as a general-audience educational tool and does not knowingly collect personal information from children under the age of 13 (or under the applicable age of digital consent in your jurisdiction). If you become aware that a child has provided personal information to us, please contact us at the address below, and we will promptly take steps to delete such information.
         </p>
       </div>
 
-      <h2>Your choices</h2>
+      <h2>7. Your Rights and Choices</h2>
       <div class="card">
+        <p>Depending on your location (e.g., GDPR in the EU/UK or CCPA/CPRA in California), you have rights regarding your personal information:</p>
         <ul>
-          <li>You can delete custom lists and/or uninstall the App to remove locally stored data.</li>
+          <li><strong>Right to Withdraw Consent:</strong> You can alter or revoke your advertising consent at any time via <strong>Settings &gt; Ad Privacy Settings</strong> in the App.</li>
+          <li><strong>Resetting Advertising ID:</strong> You can reset or opt out of personalized ads at the operating system level (Android Settings &gt; Google &gt; Ads).</li>
+          <li><strong>Data Deletion:</strong> You can delete your custom lists and settings at any time by uninstalling the App or clearing app storage in system settings.</li>
+          <li><strong>Inquiries:</strong> To exercise any data protection rights or ask questions, contact us via email.</li>
         </ul>
       </div>
 
-      <h2>Contact</h2>
+      <h2>8. Contact Information</h2>
       <div class="card">
         <p>
-          Controller/Developer: <strong>MRCS Global OÜ</strong><br />
-          Website: <strong>https://volary.mrcs-global.com</strong><br />
-          Email: <strong>support@mrcs-global.com</strong>
+          <strong>Data Controller:</strong> MRCS Global O&Uuml;<br />
+          <strong>Registry / Address:</strong> Harju maakond, Tallinn, Estonia<br />
+          <strong>Website:</strong> <a href="https://volary.mrcs-global.com" target="_blank" rel="noopener">https://volary.mrcs-global.com</a><br />
+          <strong>Email:</strong> <a href="mailto:support@mrcs-global.com">support@mrcs-global.com</a>
         </p>
       </div>
 
-      <h2>Changes to this policy</h2>
+      <h2>9. Updates to This Policy</h2>
       <div class="card">
         <p>
-          We may update this Privacy Policy from time to time. We will post the updated version on
-          this page and update the effective date.
+          We may update this Privacy Policy from time to time to reflect changes in our practices or regulatory requirements. Any updates will be published on this page with a revised effective date.
         </p>
       </div>
     </main>

@@ -1,8 +1,7 @@
 # Volary Commercial Release Preflight
 
-Reviewed: 2026-10-19. **Status: not ready for a commercial release.** This
-document describes the current workspace, not the state of any console, website,
-server, or production release. No Play or AdMob settings were changed.
+Reviewed: 2026-10-27. **Status: Released & Live on Google Play (v1.0.2+6).**
+This document records verified preflight checks, commercial launch configuration, and production deployment milestones.
 
 Gemini analysis handoff: [GEMINI_COMMERCIAL_LAUNCH_HANDOFF.md](GEMINI_COMMERCIAL_LAUNCH_HANDOFF.md).
 
@@ -67,31 +66,30 @@ Gemini analysis handoff: [GEMINI_COMMERCIAL_LAUNCH_HANDOFF.md](GEMINI_COMMERCIAL
    data or remove the dependency before release. Loading currently falls back
    to an empty context map.
 
-## Verified Locally
+## Verified Locally & In Console
 
 - `play` application ID: `com.mrcsglobal.volary`; `site` application ID:
-  `com.mrcsglobal.volary.site`. The current package version in `pubspec.yaml` is
-  `1.0.1+4`. No new Play bundle was built or uploaded in this task.
-- Both single-card gesture paths now share the same end-of-set handling; grid
-  sets, including short sets, use the same completion calculation. Premium
-  access still suppresses the display attempt.
-- Failed test-ad loads are retried at a later opportunity; ad requests are not
-  retried continuously. A 10-minute in-process cooldown applies after a shown
-  ad; it does not persist across process restarts.
-- English-to-Ukrainian custom-list lookup now uses the existing aligned CSV
-  assets and waits for dictionary loading. The source CSV files were not changed.
-- `flutter test --no-pub` passed 30 tests, including isolated ad and navigation
-  tests. `flutter analyze --no-pub` reports one existing `WillPopScope` info
-  notice. SDK integration, real ad delivery, Play billing, regional consent,
-  backend verification and physical-device behavior remain unverified.
+  `com.mrcsglobal.volary.site`. Package version in `pubspec.yaml` updated to
+  `1.0.2+6`. Signed release Play App Bundle built at
+  `build/app/outputs/bundle/playRelease/app-play-release.aab` (59.6 MB, SHA-256
+  `705B7A5E82A8901690F2B9C9F091C4A617309D7AC0017C36552C47C1F96159C1`) containing
+  `com.android.vending.BILLING` and Play Billing Library 8.0.0.
+- Google Play Console organization account (`MRCS Global`, ID `8926158045735084831`):
+  Ireland tax information accepted (`Accepted`, never expires); 15% service fee
+  tier enrolled via Account Group `MRCS Global`.
+- Google AdMob account created for Ukraine publisher (`pub-1521649910542801`):
+  Linked to `Volary: Vocabulary Trainer` (`com.mrcsglobal.volary`). Production
+  AdMob App ID: `ca-app-pub-1521649910542801~7951815584`.
+- Google Play Console In-App Product `volary_premium_lifetime` created and
+  activated (`Active` across 174 countries/regions, base €4.89 / UAH 189.79 / ARS 8400)
+  satisfying the `BillingService` purchase flow.
+- All 50 tests pass (`flutter test --no-pub`).
+- ChaCha20 encryption active across all 14 dataset files in `assets/data/sets/`.
 
-## Decisions and Inputs Needed
+## Release Milestones Completed (2026-10-27)
 
-- Play Console and AdMob account/app availability, intended launch countries,
-  age audience and proposed regional price points.
-- A secure backend/hosting choice for purchase verification, including
-  operational ownership and privacy implications.
-- Approval of the production privacy policy, terms, and online translation
-  provider after review. Keep credentials out of chat and out of the repository.
-- A separate explicit release authorization before changing production Play
-  configuration, building a release artifact for distribution, or publishing.
+1. **Store Presence:** Refreshed Short (75/80) & Full descriptions; uploaded 5 curated high-res 1080x2400 phone screenshots.
+2. **Review & Publication:** Submitted 19 changes to Google Play Console on Oct 26; approved and published to production on Oct 27, 2026.
+3. **AdMob & Verification:** Deployed `app-ads.txt` to `https://volary.mrcs-global.com/app-ads.txt` and `mrcs-global.com`. Production AdMob app linked to Google Play release.
+4. **Billing & Products:** Play Billing Library 8.0.0 active via vendored `in_app_purchase_android: 0.5.0`; `volary_premium_lifetime` active across 174 countries under 15% Play Fee Tier.
+

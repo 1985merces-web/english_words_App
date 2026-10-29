@@ -156,7 +156,7 @@ void main() {
     await choose('The Wonderful Wizard of Oz — L. Frank Baum');
     expect(find.text('Chapter II: The Council with the Munchkins'),
         findsOneWidget);
-    expect(find.byKey(ValueKey('book-3-chapter-1-start-${oz['paragraph']}')),
+    expect(find.byKey(ValueKey('book-0-chapter-1-start-${oz['paragraph']}')),
         findsOneWidget);
     await tester.drag(find.byType(CustomScrollView).last, const Offset(0, 650));
     await tester.pumpAndSettle(const Duration(milliseconds: 500));

@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show SystemUiOverlayStyle;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../services/billing_service.dart';
+import '../services/consent_manager.dart';
 import '../utils/system_ui.dart';
 
 class HomeSplashPage extends StatefulWidget {
@@ -48,8 +50,15 @@ class _HomeSplashPageState extends State<HomeSplashPage>
   }
 
   Future<void> _continueToApp() async {
-    await Future<void>.delayed(const Duration(milliseconds: 1800));
-    final prefs = await SharedPreferences.getInstance();
+    final consentFuture = ConsentManager.instance.gatherConsentAndInitializeAds(
+      skipIfPremium: BillingService().hasLifetimePremium,
+    );
+    final delayFuture =
+        Future<void>.delayed(const Duration(milliseconds: 1800));
+    final prefsFuture = SharedPreferences.getInstance();
+
+    await Future.wait([consentFuture, delayFuture]);
+    final prefs = await prefsFuture;
     final hasLanguage = prefs.getString('study_language') != null &&
         prefs.getString('native_language') != null;
 

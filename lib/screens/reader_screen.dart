@@ -4,13 +4,13 @@ import 'dart:math' as math;
 import 'package:csv/csv.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show ByteData, rootBundle;
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/reader_book.dart';
 import '../models/word_entry.dart';
 import '../services/document_text_extractor.dart';
+import '../services/encrypted_asset_loader.dart';
 import 'reader_strings.dart';
 
 class ReaderScreen extends StatefulWidget {
@@ -48,29 +48,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   bool _isImportingDocument = false;
   String? _importedDocumentName;
 
-  // Predefined stories
-  final List<Map<String, String>> _stories = [
-    {
-      'title': 'The Lost Key',
-      'level': 'A2',
-      'content':
-          'One sunny morning, Lily found an old, rusty key in her garden. It was lying under a big rose bush. She wondered what it opened. She ran to her grandmother and showed it to her. Her grandmother smiled and told her about an old wooden chest in the attic. Lily was very excited and went upstairs to search for the chest. In a dark corner of the attic, she found it covered in dust. She inserted the key, turned it with a click, and the box opened slowly. Inside, she found old photographs and a beautiful silver pocket watch.',
-    },
-    {
-      'title': 'The Mysterious Traveler',
-      'level': 'B2',
-      'content':
-          'A mysterious traveler arrived in the quiet valley just as the sun set behind the mountains. He wore a long dark coat and carried a wooden suitcase covered in strange symbols. The locals watched him from behind their curtains with curiosity and suspicion. He checked into the only inn at the edge of the town. During the night, strange melodies drifted from his room, played on an instrument no one had ever seen before. The next morning, he disappeared, leaving the suitcase behind. When the innkeeper opened it, he found only a collection of glowing blue stones and a map of the stars.',
-    },
-    {
-      'title': 'The Future of AI',
-      'level': 'C1',
-      'content':
-          'The rapid evolution of artificial intelligence has sparked intense debates across global industries. Critics argue that unchecked development could lead to widespread labor displacement and reinforce systemic biases embedded in training datasets. Conversely, proponents emphasize the transformative potential of machine learning systems in accelerating scientific discoveries, optimizing energy grids, and providing personalized education. As the boundary between human capability and algorithmic automation blurs, establishing robust ethical guidelines and regulatory frameworks becomes imperative to ensure that technological progress aligns with human values.',
-    },
-  ];
-
-  int _selectedStoryIndex = 0;
+  int? _selectedStoryIndex;
   int _selectedChapterIndex = 0;
   Future<ReaderBook>? _selectedBook;
   SharedPreferences? _preferences;
@@ -131,14 +109,8 @@ class _ReaderScreenState extends State<ReaderScreen>
   Future<void> _selectStory(int index) async {
     _chapterViewKey.currentState?._savePosition();
     final generation = ++_selectionGeneration;
-    if (index < _stories.length) {
-      setState(() {
-        _selectedStoryIndex = index;
-        _selectedBook = null;
-      });
-      return;
-    }
-    final info = ReaderBookInfo.englishBooks[index - _stories.length];
+    if (index < 0 || index >= ReaderBookInfo.englishBooks.length) return;
+    final info = ReaderBookInfo.englishBooks[index];
     final bookFuture = ReaderBook.load(info);
     setState(() {
       _selectedStoryIndex = index;
@@ -173,13 +145,10 @@ class _ReaderScreenState extends State<ReaderScreen>
       final studyPath = 'assets/data/sets/${widget.studyLang}.csv';
       final nativePath = 'assets/data/sets/${widget.nativeLang}.csv';
 
-      final ByteData studyBytes = await rootBundle.load(studyPath);
-      final ByteData nativeBytes = await rootBundle.load(nativePath);
-
       final String studyData =
-          utf8.decode(studyBytes.buffer.asUint8List(), allowMalformed: true);
+          await EncryptedAssetLoader.loadString(studyPath);
       final String nativeData =
-          utf8.decode(nativeBytes.buffer.asUint8List(), allowMalformed: true);
+          await EncryptedAssetLoader.loadString(nativePath);
 
       List<List<dynamic>> parseCsv(String data) {
         List<List<dynamic>> table = const CsvToListConverter().convert(data);
@@ -715,43 +684,81 @@ class _ReaderScreenState extends State<ReaderScreen>
   // Create new custom list dialog
   void _showCreateListDialog(StateSetter setSheetState) {
     final TextEditingController newListNameController = TextEditingController();
+    final bool isDark = widget.darkTheme;
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: widget.darkTheme
-            ? const Color(0xFF2C3E50)
-            : const Color(0xFFFDFBFF),
+        backgroundColor: isDark ? const Color(0xFF1E2A3A) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text(
           _t(ReaderText.createListTitle),
           style: TextStyle(
-            color: widget.darkTheme ? Colors.white : Colors.black87,
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+            color: isDark ? Colors.white : const Color(0xFF102A43),
           ),
         ),
         content: TextField(
           controller: newListNameController,
           autofocus: true,
           cursorColor:
-              widget.darkTheme ? Colors.white : const Color(0xFF1A237E),
+              isDark ? const Color(0xFF2AB7A9) : const Color(0xFF1F6F78),
           style: TextStyle(
-            color: widget.darkTheme ? Colors.white : Colors.black87,
+            fontSize: 18,
+            color: isDark ? Colors.white : const Color(0xFF102A43),
           ),
           decoration: InputDecoration(
+            labelText: _t(ReaderText.listNameHint),
+            labelStyle: TextStyle(
+              color: isDark ? const Color(0xFF2AB7A9) : const Color(0xFF1F6F78),
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+            ),
             hintText: _t(ReaderText.listNameHint),
             hintStyle: TextStyle(
-              color: widget.darkTheme ? Colors.white38 : Colors.black38,
+              color: isDark ? Colors.white38 : const Color(0xFF94A3B8),
+            ),
+            focusedBorder: UnderlineInputBorder(
+              borderSide: BorderSide(
+                color: isDark
+                    ? const Color(0xFF2AB7A9)
+                    : const Color(0xFF1F6F78),
+                width: 2,
+              ),
+            ),
+            enabledBorder: UnderlineInputBorder(
+              borderSide: BorderSide(
+                color: isDark ? Colors.white24 : const Color(0xFFCBD5E1),
+                width: 1.5,
+              ),
             ),
           ),
         ),
+        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         actions: [
           TextButton(
-            child: Text(_t(ReaderText.cancel),
-                style: const TextStyle(color: Colors.grey)),
+            child: Text(
+              _t(ReaderText.cancel),
+              style: TextStyle(
+                color: isDark ? Colors.white70 : const Color(0xFF64748B),
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
             onPressed: () => Navigator.pop(context),
           ),
-          TextButton(
-            child: Text(_t(ReaderText.create),
-                style: const TextStyle(
-                    color: Colors.green, fontWeight: FontWeight.bold)),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor:
+                  isDark ? const Color(0xFF2AB7A9) : const Color(0xFF1F6F78),
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              textStyle:
+                  const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            ),
             onPressed: () async {
               final name = newListNameController.text.trim();
               final navigator = Navigator.of(context);
@@ -778,6 +785,7 @@ class _ReaderScreenState extends State<ReaderScreen>
               }
               navigator.pop();
             },
+            child: Text(_t(ReaderText.create)),
           ),
         ],
       ),
@@ -906,8 +914,8 @@ class _ReaderScreenState extends State<ReaderScreen>
         final chapters = snapshot.data!.chapters;
         final chapter = chapters[_selectedChapterIndex];
         final bookId = ReaderBookInfo
-            .englishBooks[_selectedStoryIndex - _stories.length].id;
-        final storyIndex = _selectedStoryIndex;
+            .englishBooks[_selectedStoryIndex!].id;
+        final storyIndex = _selectedStoryIndex!;
         final chapterIndex = _selectedChapterIndex;
         void selectChapter(int index) {
           _chapterViewKey.currentState?._savePosition();
@@ -1082,40 +1090,47 @@ class _ReaderScreenState extends State<ReaderScreen>
                       value: _selectedStoryIndex,
                       dropdownColor: cardColor,
                       isExpanded: true,
+                      hint: Text(
+                        widget.nativeLang == 'uk'
+                            ? 'Оберіть книгу'
+                            : (widget.nativeLang == 'de'
+                                ? 'Buch wählen'
+                                : (widget.nativeLang == 'es'
+                                    ? 'Elegir libro'
+                                    : 'Choose a book')),
+                        style: textStyle.copyWith(
+                            fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
                       style: textStyle.copyWith(
                           fontSize: 16, fontWeight: FontWeight.bold),
                       icon: Icon(Icons.arrow_drop_down, color: primaryColor),
                       items: [
-                        ...List.generate(_stories.length, (index) {
-                          final story = _stories[index];
-                          final difficulty = switch (story['level']) {
-                            'A2' => ReaderText.easy,
-                            'B2' => ReaderText.medium,
-                            _ => ReaderText.advanced,
-                          };
-                          return DropdownMenuItem<int>(
-                            value: index,
-                            child: Text(
-                              '${story['title']} (${_t(difficulty)} - ${story['level']})',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          );
-                        }),
                         if (widget.studyLang == 'en')
                           ...ReaderBookInfo.englishBooks.asMap().entries.map(
                                 (entry) => DropdownMenuItem<int>(
-                                  value: _stories.length + entry.key,
+                                  value: entry.key,
                                   child: Text(
                                     '${entry.value.title} — ${entry.value.author}',
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
-                              ),
+                              )
+                        else
+                          DropdownMenuItem<int>(
+                            value: -1,
+                            enabled: false,
+                            child: Text(
+                              _t(ReaderText.stories),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
                       ],
                       onChanged: (int? newValue) {
-                        if (newValue != null) _selectStory(newValue);
+                        if (newValue != null && newValue >= 0) {
+                          _selectStory(newValue);
+                        }
                       },
                     ),
                   ),
@@ -1124,10 +1139,9 @@ class _ReaderScreenState extends State<ReaderScreen>
                     _lastBookId != null &&
                     ReaderBookInfo.englishBooks
                         .any((b) => b.id == _lastBookId) &&
-                    (_selectedStoryIndex < _stories.length ||
+                    (_selectedStoryIndex == null ||
                         ReaderBookInfo
-                                .englishBooks[
-                                    _selectedStoryIndex - _stories.length]
+                                .englishBooks[_selectedStoryIndex!]
                                 .id !=
                             _lastBookId))
                   Padding(
@@ -1135,9 +1149,8 @@ class _ReaderScreenState extends State<ReaderScreen>
                     child: Align(
                       alignment: Alignment.centerLeft,
                       child: TextButton.icon(
-                        onPressed: () => _selectStory(_stories.length +
-                            ReaderBookInfo.englishBooks
-                                .indexWhere((b) => b.id == _lastBookId)),
+                        onPressed: () => _selectStory(ReaderBookInfo.englishBooks
+                            .indexWhere((b) => b.id == _lastBookId)),
                         icon: const Icon(Icons.bookmark_outline),
                         label: Text(_t(ReaderText.continueReading)),
                       ),
@@ -1172,15 +1185,6 @@ class _ReaderScreenState extends State<ReaderScreen>
                                     fontSize: 14,
                                     color: mutedTextColor,
                                     fontStyle: FontStyle.italic,
-                                  ),
-                                ),
-                                const SizedBox(height: 16),
-                                RichText(
-                                  text: TextSpan(
-                                    children: _buildTextSpans(
-                                        _stories[_selectedStoryIndex]
-                                            ['content']!,
-                                        context),
                                   ),
                                 ),
                               ],

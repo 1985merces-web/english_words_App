@@ -52,6 +52,16 @@ class InterstitialAdManager {
     });
   }
 
+  void clear() {
+    final ad = _ad;
+    _ad = null;
+    if (ad != null) {
+      unawaited(Future<void>.sync(ad.dispose).catchError((Object error) {
+        debugPrint('InterstitialAd disposal failed: $error');
+      }));
+    }
+  }
+
   void show({required VoidCallback onAdClosed}) {
     final lastShown = _lastShown;
     if (_showing ||

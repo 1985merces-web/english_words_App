@@ -13,8 +13,7 @@ import 'package:flutter/services.dart'
         SystemUiOverlayStyle,
         SystemNavigator,
         SystemSound,
-        SystemSoundType,
-        rootBundle;
+        SystemSoundType;
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -26,10 +25,13 @@ import '../models/language_catalog.dart';
 import '../utils/system_ui.dart';
 import '../services/ad_helper.dart';
 import '../services/billing_service.dart';
+import '../services/consent_manager.dart';
 import 'reader_screen.dart';
 import '../widgets/adaptive_card_text.dart';
 import '../widgets/grid_card_text_layout.dart';
 import '../widgets/premium_paywall_sheet.dart';
+import '../services/encrypted_asset_loader.dart';
+import '../services/sound_service.dart';
 
 class _LiquidGlassSurface extends StatelessWidget {
   const _LiquidGlassSurface({
@@ -153,6 +155,7 @@ class FlashcardScreen extends StatefulWidget {
 class _FlashcardScreenState extends State<FlashcardScreen>
     with WidgetsBindingObserver {
   static const int _cardsPerGridPage = 10;
+  static const bool _showContextSentenceExamples = false;
   bool showENFace = true;
   bool gridMode = false;
   int gridPage = 0;
@@ -188,6 +191,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
   DateTime? sleepTimerEnd;
   final TextEditingController sleepTimerController = TextEditingController();
   String activeSettingsPanel = '';
+  bool _sleepTimerExpiring = false;
 
   // Add this to track loading state
   bool isLoading = true;
@@ -198,6 +202,19 @@ class _FlashcardScreenState extends State<FlashcardScreen>
   Map<String, String> englishContextSentences = {};
   List<String> allCustomListNames = [];
   List<WordEntry> _customEntries = []; // Cache for starred and custom words
+  Set<String> _customWordsSet = {};
+
+  void _updateCustomWordsSet() {
+    _customWordsSet = _customEntries
+        .map((e) => e.wordMain.trim().toLowerCase())
+        .toSet();
+  }
+
+  bool _isWordInCustomList(WordEntry? word) {
+    if (word == null) return false;
+    return _customWordsSet.contains(word.wordMain.trim().toLowerCase());
+  }
+
   Map<String, List<String>>? _groupedListsCache;
   AudioSession? _audioSession;
   StreamSubscription<AudioInterruptionEvent>? _audioInterruptionSub;
@@ -225,13 +242,16 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (_) => PremiumPaywallSheet(featureName: featureName),
+      builder: (_) => PremiumPaywallSheet(
+        featureName: featureName,
+        languageCode: _uiLangCode(),
+      ),
     );
     return unlocked ?? BillingService().hasPremiumAccess;
   }
 
   Future<void> _openReader() async {
-    if (!await _requirePremium('Читалка')) return;
+    if (!await _requirePremium(_t('reader'))) return;
     if (!mounted) return;
 
     _playTapClick();
@@ -262,18 +282,22 @@ class _FlashcardScreenState extends State<FlashcardScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // When disabled: stop any running TTS as soon as the app is backgrounded
-    // (screen off/locked or app minimized).
-    if (!allowBackgroundSpeaking &&
-        (state == AppLifecycleState.inactive ||
-            state == AppLifecycleState.paused ||
-            state == AppLifecycleState.detached)) {
-      stopPlaying();
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      _saveCurrentPosition();
+      // When disabled: stop any running TTS as soon as the app is backgrounded
+      // (screen off/locked or app minimized).
+      if (!allowBackgroundSpeaking) {
+        stopPlaying();
+      }
     }
   }
 
   @override
   void dispose() {
+    _saveCurrentPosition();
     WidgetsBinding.instance.removeObserver(this);
     stopPlaying(updateUi: false);
     _audioInterruptionSub?.cancel();
@@ -341,6 +365,27 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     });
   }
 
+  Future<void> _saveCurrentPosition() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (selectedLevel.isNotEmpty) {
+        await prefs.setString('last_selected_level', selectedLevel);
+      }
+      if (selectedSublist.isNotEmpty) {
+        await prefs.setString('last_selected_sublist', selectedSublist);
+      }
+      if (currentSetWords.isNotEmpty &&
+          currentIndex >= 0 &&
+          currentIndex < currentSetWords.length) {
+        await prefs.setString(
+            'last_word_main', currentSetWords[currentIndex].wordMain);
+        await prefs.setInt('last_card_index', currentIndex);
+      }
+      await prefs.setBool('last_grid_mode', gridMode);
+      await prefs.setInt('last_grid_page', gridPage);
+    } catch (_) {}
+  }
+
   static const Map<String, Map<String, String>> _uiStrings = {
     'en': {
       'cards': 'Cards',
@@ -361,6 +406,11 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       'legal': 'legal',
       'privacy_policy': 'Privacy Policy',
       'terms_of_use': 'Terms of Use',
+      'ad_privacy': 'Ad Privacy Settings',
+      'privacy_options_unavailable':
+          'Ad privacy options are not required or available in your region.',
+      'reader': 'Reader',
+      'autoplay': 'Autoplay',
       'repeat_list': 'repeat list',
       'play_once': 'In order',
       'off': 'off',
@@ -379,6 +429,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       'processing_words': 'Processing words',
       'finding_translations': 'Finding translations...',
       'could_not_open': 'Could not open',
+      'saved_to_custom': 'Saved "{word}" to custom list.',
       'removed_from_custom': 'Removed "{word}" from custom list.',
       'already_in_list': '"{word}" is already in the target list.',
       'error_creating_list': 'Error creating list',
@@ -406,6 +457,11 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       'legal': 'правова інформація',
       'privacy_policy': 'Політика конфіденційності',
       'terms_of_use': 'Умови використання',
+      'ad_privacy': 'Налаштування реклами',
+      'privacy_options_unavailable':
+          'Налаштування конфіденційності реклами недоступні для вашого регіону.',
+      'reader': 'Читалка',
+      'autoplay': 'Автоплей',
       'repeat_list': 'Повторювати список',
       'play_once': 'По порядку',
       'off': 'вимкнено',
@@ -424,6 +480,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       'processing_words': 'Опрацьовуємо слова',
       'finding_translations': 'Пошук перекладів...',
       'could_not_open': 'Не вдалося відкрити',
+      'saved_to_custom': 'Збережено "{word}" до власного списку.',
       'removed_from_custom': 'Видалено "{word}" з власного списку.',
       'already_in_list': '"{word}" вже є у вибраному списку.',
       'error_creating_list': 'Помилка створення списку',
@@ -451,6 +508,11 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       'legal': 'legal',
       'privacy_policy': 'Politica de privacidad',
       'terms_of_use': 'Terminos de uso',
+      'ad_privacy': 'Privacidad de anuncios',
+      'privacy_options_unavailable':
+          'Las opciones de privacidad de anuncios no estan disponibles en tu region.',
+      'reader': 'Lector',
+      'autoplay': 'Reproduccion automatica',
       'repeat_list': 'Repetir lista',
       'play_once': 'En orden',
       'off': 'apagado',
@@ -469,6 +531,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       'processing_words': 'Procesando palabras',
       'finding_translations': 'Buscando traducciones...',
       'could_not_open': 'No se pudo abrir',
+      'saved_to_custom': 'Se guardo "{word}" en la lista personalizada.',
       'removed_from_custom': 'Se elimino "{word}" de la lista personalizada.',
       'error_creating_list': 'Error al crear la lista',
       'delete_list': 'Eliminar lista',
@@ -495,6 +558,11 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       'legal': 'legal',
       'privacy_policy': 'Politica de privacidade',
       'terms_of_use': 'Termos de uso',
+      'ad_privacy': 'Privacidade de anuncios',
+      'privacy_options_unavailable':
+          'As opcoes de privacidade de anuncios nao estao disponiveis na sua regiao.',
+      'reader': 'Leitor',
+      'autoplay': 'Reproducao automatica',
       'repeat_list': 'Repetir lista',
       'play_once': 'Em ordem',
       'off': 'desligado',
@@ -513,6 +581,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       'processing_words': 'Processando palavras',
       'finding_translations': 'Procurando traducoes...',
       'could_not_open': 'Nao foi possivel abrir',
+      'saved_to_custom': '"{word}" salva na lista personalizada.',
       'removed_from_custom': 'Removido "{word}" da lista personalizada.',
       'error_creating_list': 'Erro ao criar a lista',
       'delete_list': 'Excluir lista',
@@ -539,6 +608,11 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       'legal': 'Rechtliches',
       'privacy_policy': 'Datenschutz',
       'terms_of_use': 'Nutzungsbedingungen',
+      'ad_privacy': 'Werbeeinstellungen',
+      'privacy_options_unavailable':
+          'Werbeeinstellungen sind in Ihrer Region nicht erforderlich oder verfugbar.',
+      'reader': 'Reader',
+      'autoplay': 'Autoplay',
       'repeat_list': 'Liste wiederholen',
       'play_once': 'Der Reihe nach',
       'off': 'aus',
@@ -557,6 +631,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       'processing_words': 'Worter werden verarbeitet',
       'finding_translations': 'Ubersetzungen werden gesucht...',
       'could_not_open': 'Konnte nicht offnen',
+      'saved_to_custom': '"{word}" zur eigenen Liste hinzugefugt.',
       'removed_from_custom': '"{word}" wurde aus der eigenen Liste entfernt.',
       'error_creating_list': 'Fehler beim Erstellen der Liste',
       'delete_list': 'Liste loschen',
@@ -583,6 +658,11 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       'legal': 'legal',
       'privacy_policy': 'Politique de confidentialite',
       'terms_of_use': 'Conditions d\'utilisation',
+      'ad_privacy': 'Confidentialite des annonces',
+      'privacy_options_unavailable':
+          'Les parametres de confidentialite des annonces ne sont pas disponibles dans votre region.',
+      'reader': 'Lecteur',
+      'autoplay': 'Lecture automatique',
       'repeat_list': 'Repeter la liste',
       'play_once': 'Dans l\'ordre',
       'off': 'desactive',
@@ -601,6 +681,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       'processing_words': 'Traitement des mots',
       'finding_translations': 'Recherche de traductions...',
       'could_not_open': 'Impossible d\'ouvrir',
+      'saved_to_custom': '"{word}" ajoute a la liste personnalisee.',
       'removed_from_custom':
           '"{word}" a ete supprime de la liste personnalisee.',
       'error_creating_list': 'Erreur lors de la creation de la liste',
@@ -628,6 +709,11 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       'legal': 'legale',
       'privacy_policy': 'Informativa sulla privacy',
       'terms_of_use': 'Termini di utilizzo',
+      'ad_privacy': 'Privacy degli annunci',
+      'privacy_options_unavailable':
+          'Le opzioni di privacy degli annunci non sono disponibili nella tua area geografica.',
+      'reader': 'Lettore',
+      'autoplay': 'Riproduzione automatica',
       'repeat_list': 'Ripeti lista',
       'play_once': 'In ordine',
       'off': 'spento',
@@ -646,6 +732,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       'processing_words': 'Elaborazione parole',
       'finding_translations': 'Ricerca traduzioni...',
       'could_not_open': 'Impossibile aprire',
+      'saved_to_custom': '"{word}" aggiunta alla lista personalizzata.',
       'removed_from_custom': 'Rimosso "{word}" dalla lista personalizzata.',
       'error_creating_list': 'Errore nella creazione della lista',
       'delete_list': 'Elimina lista',
@@ -672,6 +759,11 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       'legal': 'yasal',
       'privacy_policy': 'Gizlilik politikasi',
       'terms_of_use': 'Kullanim kosullari',
+      'ad_privacy': 'Reklam Gizliligi',
+      'privacy_options_unavailable':
+          'Reklam gizliligi ayarlari bolgenizde gerekli degil veya kullanilamiyor.',
+      'reader': 'Okuyucu',
+      'autoplay': 'Otomatik oynatma',
       'repeat_list': 'Listeyi tekrar et',
       'play_once': 'Sirayla',
       'off': 'kapali',
@@ -690,6 +782,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       'processing_words': 'Kelimeler isleniyor',
       'finding_translations': 'Ceviriler bulunuyor...',
       'could_not_open': 'Acilamadi',
+      'saved_to_custom': '"{word}" ozel listeye eklendi.',
       'removed_from_custom': '"{word}" ozel listeden kaldirildi.',
       'error_creating_list': 'Liste olusturma hatasi',
       'delete_list': 'Listeyi sil',
@@ -713,15 +806,20 @@ class _FlashcardScreenState extends State<FlashcardScreen>
   Future<void> _loadCustomListNames() async {
     final prefs = await SharedPreferences.getInstance();
     allCustomListNames = prefs.getStringList('custom_list_names') ?? [];
+    if (targetCustomSet.isEmpty && allCustomListNames.isNotEmpty) {
+      targetCustomSet = allCustomListNames.first;
+      await prefs.setString('targetCustomSet', targetCustomSet);
+    }
     _invalidateGroupedLists();
   }
 
   Future<Map<String, String>> _loadEnglishContextSentences() async {
+    if (!_showContextSentenceExamples) return const {};
     if (englishContextSentences.isNotEmpty) return englishContextSentences;
 
     try {
       final rawData =
-          await rootBundle.loadString('assets/data/sets/master_en.jsonl');
+          await EncryptedAssetLoader.loadString('assets/data/sets/master_en.jsonl');
       final Map<String, String> contexts = {};
       for (final line in rawData.split('\n')) {
         final trimmed = line.trim();
@@ -743,6 +841,35 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     return englishContextSentences;
   }
 
+  void _attachContextSentences(Map<String, String> contexts) {
+    if (!_showContextSentenceExamples || contexts.isEmpty || allWords.isEmpty) return;
+    var changed = false;
+    for (var i = 0; i < allWords.length; i++) {
+      final w = allWords[i];
+      if (w.example1.isEmpty) {
+        final ex = contexts[w.wordMain.toLowerCase()];
+        if (ex != null && ex.isNotEmpty) {
+          allWords[i] = WordEntry(
+            w.level,
+            w.sublist,
+            w.wordMain,
+            w.trans1,
+            ex,
+            w.example2,
+            w.example3,
+            w.example4,
+            w.wordSyn,
+            w.trans2,
+          );
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      filterCurrentSet();
+    }
+  }
+
   void _invalidateGroupedLists() {
     _groupedListsCache = null;
   }
@@ -756,6 +883,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
   }
 
   void _cancelSleepTimer() {
+    _sleepTimerExpiring = false;
     sleepTimer?.cancel();
     sleepTicker?.cancel();
     sleepTimer = null;
@@ -785,15 +913,52 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       setState(() {});
     });
     sleepTimer = Timer(duration, () {
-      if (!mounted) return;
-      stopPlaying();
+      _onSleepTimerTriggered();
+    });
+  }
+
+  void _onSleepTimerTriggered() {
+    if (!mounted) return;
+    if (isPlaying) {
+      _sleepTimerExpiring = true;
+      // Safety timeout: if speaking takes longer than 8s, force finish
+      Timer(const Duration(seconds: 8), () {
+        if (_sleepTimerExpiring && mounted) {
+          _sleepTimerExpiring = false;
+          _handleSleepTimerFinished();
+        }
+      });
+    } else {
+      _handleSleepTimerFinished();
+    }
+  }
+
+  Future<void> _handleSleepTimerFinished() async {
+    if (!mounted) return;
+
+    // 1. Ensure speaking loop is stopped
+    stopPlaying(updateUi: true);
+
+    // 2. Clear timer state
+    if (mounted) {
       setState(() {
         _cancelSleepTimer();
       });
-      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-        SystemNavigator.pop();
-      }
-    });
+    }
+
+    // 3. Save current card position
+    await _saveCurrentPosition();
+
+    // 4. Play the calm double chime
+    await SoundService.playTimerChime();
+
+    // 5. Allow 2.1 seconds for the chime to complete naturally
+    await Future.delayed(const Duration(milliseconds: 2100));
+
+    // 6. Close the app completely as requested
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      SystemNavigator.pop();
+    }
   }
 
   Future<void> loadWords() async {
@@ -837,18 +1002,20 @@ class _FlashcardScreenState extends State<FlashcardScreen>
           return secondary;
         }
 
-        final contextSentences = sLang == 'en'
-            ? await _loadEnglishContextSentences()
-            : const <String, String>{};
+        final contextSentences = englishContextSentences;
+        if (sLang == 'en' && contextSentences.isEmpty) {
+          unawaited(_loadEnglishContextSentences().then((contexts) {
+            if (mounted && contexts.isNotEmpty) {
+              setState(() => _attachContextSentences(contexts));
+            }
+          }));
+        }
         final String studyPath = 'assets/data/sets/$sLang.csv';
         final String nativePath = 'assets/data/sets/$nLang.csv';
-        final ByteData studyBytes = await rootBundle.load(studyPath);
-        final ByteData nativeBytes = await rootBundle.load(nativePath);
-
         final String studyData =
-            utf8.decode(studyBytes.buffer.asUint8List(), allowMalformed: true);
+            await EncryptedAssetLoader.loadString(studyPath);
         final String nativeData =
-            utf8.decode(nativeBytes.buffer.asUint8List(), allowMalformed: true);
+            await EncryptedAssetLoader.loadString(nativePath);
 
         final studyTable = parseCsv(studyData);
         final nativeTable = parseCsv(nativeData);
@@ -910,6 +1077,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
 
     // Load custom lists from SharedPreferences and cache them
     _customEntries = await _loadCustomLists();
+    _updateCustomWordsSet();
 
     // Merge predefined and custom lists
     allWords.addAll(_customEntries);
@@ -927,10 +1095,46 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       if (subs.isNotEmpty) initSub = subs.first;
     }
 
+    final savedLevel = prefs.getString('last_selected_level');
+    final savedSub = prefs.getString('last_selected_sublist');
+    final savedWord = prefs.getString('last_word_main');
+    final savedIndex = prefs.getInt('last_card_index');
+    final savedGridMode = prefs.getBool('last_grid_mode');
+    final savedGridPage = prefs.getInt('last_grid_page');
+
+    if (savedLevel != null &&
+        grouped.containsKey(savedLevel) &&
+        savedSub != null &&
+        (grouped[savedLevel]?.contains(savedSub) ?? false)) {
+      initLevel = savedLevel;
+      initSub = savedSub;
+    }
+
     setState(() {
       selectedLevel = initLevel;
       selectedSublist = initSub;
       filterCurrentSet();
+      if (savedWord != null && currentSetWords.isNotEmpty) {
+        final foundIdx = currentSetWords.indexWhere(
+            (w) => w.wordMain.trim().toLowerCase() == savedWord.trim().toLowerCase());
+        if (foundIdx != -1) {
+          currentIndex = foundIdx;
+        } else if (savedIndex != null &&
+            savedIndex >= 0 &&
+            savedIndex < currentSetWords.length) {
+          currentIndex = savedIndex;
+        }
+      } else if (savedIndex != null &&
+          savedIndex >= 0 &&
+          savedIndex < currentSetWords.length) {
+        currentIndex = savedIndex;
+      }
+      if (savedGridMode != null) {
+        gridMode = savedGridMode;
+      }
+      if (savedGridPage != null && savedGridPage >= 0) {
+        gridPage = savedGridPage;
+      }
       isLoading = false;
     });
 
@@ -1000,6 +1204,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       selectedSublist = newSet;
       filterCurrentSet();
     });
+    _saveCurrentPosition();
   }
 
   @override
@@ -1052,6 +1257,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       currentIndex = next.index;
       showENFace = widget.showENasDefault;
     });
+    _saveCurrentPosition();
     if (shouldRequestSetCompletionAd(
         finishedSet: next.finishedSet,
         hasPremiumAccess: BillingService().hasPremiumAccess)) {
@@ -1067,6 +1273,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       }
       showENFace = widget.showENasDefault;
     });
+    _saveCurrentPosition();
   }
 
   void nextGridPage() {
@@ -1079,6 +1286,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       gridCardENFace =
           List.filled(_cardsPerGridPage, showENFace); // <-- use current default
     });
+    _saveCurrentPosition();
     if (shouldRequestSetCompletionAd(
         finishedSet: next.finishedSet,
         hasPremiumAccess: BillingService().hasPremiumAccess)) {
@@ -1226,8 +1434,9 @@ class _FlashcardScreenState extends State<FlashcardScreen>
         try {
           await speakEntry(entry, studyFirst: speakStudyFirst);
         } catch (_) {}
-        if (!isPlaying) break;
+        if (!isPlaying || _sleepTimerExpiring) break;
         await Future.delayed(const Duration(milliseconds: 700));
+        if (!isPlaying || _sleepTimerExpiring) break;
       }
     } else {
       int i = startIdx;
@@ -1257,8 +1466,9 @@ class _FlashcardScreenState extends State<FlashcardScreen>
         try {
           await speakEntry(entry, studyFirst: speakStudyFirst);
         } catch (_) {}
-        if (!isPlaying) break;
+        if (!isPlaying || _sleepTimerExpiring) break;
         await Future.delayed(const Duration(seconds: 1));
+        if (!isPlaying || _sleepTimerExpiring) break;
         i++;
       }
     }
@@ -1269,11 +1479,17 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     if (!_pausedByInterruption) {
       unawaited(_deactivateAudioSession());
     }
+
+    if (_sleepTimerExpiring) {
+      _sleepTimerExpiring = false;
+      unawaited(_handleSleepTimerFinished());
+    }
   }
 
   // Optionally, add a stop function
   void stopPlaying({bool updateUi = true, bool dueToInterruption = false}) {
     isPlaying = false;
+    _sleepTimerExpiring = false;
     if (!dueToInterruption) {
       _pausedByInterruption = false;
     }
@@ -1291,9 +1507,10 @@ class _FlashcardScreenState extends State<FlashcardScreen>
 
   Future<void> _loadDictionary() async {
     try {
-      final englishRaw = await rootBundle.loadString('assets/data/sets/en.csv');
+      final englishRaw =
+          await EncryptedAssetLoader.loadString('assets/data/sets/en.csv');
       final ukrainianRaw =
-          await rootBundle.loadString('assets/data/sets/uk.csv');
+          await EncryptedAssetLoader.loadString('assets/data/sets/uk.csv');
       final english = const CsvToListConverter().convert(englishRaw);
       final ukrainian = const CsvToListConverter().convert(ukrainianRaw);
       if (english.length != ukrainian.length) {
@@ -1455,14 +1672,15 @@ class _FlashcardScreenState extends State<FlashcardScreen>
       singleCardHasExpandedTranslation ? 180.0 : 140.0,
       cardWidth * 0.52,
     );
-    const double singleCardGapHeight = 18.0;
-    const double singleCardExamplesHeight = 56.0;
+    const double singleCardGapHeight =
+        _showContextSentenceExamples ? 18.0 : 0.0;
+    const double singleCardExamplesHeight =
+        _showContextSentenceExamples ? 56.0 : 0.0;
     final double singleCardSectionHeight =
         cardHeight + singleCardGapHeight + singleCardExamplesHeight;
-    final bool isWideGrid = safeWidth >= 420.0;
     final double bottomSafePadding = mediaQuery.viewPadding.bottom;
     const double bottomBarHeight = 72.0;
-    final double gridCardMinHeight = isWideGrid ? 118.0 : 92.0;
+    final double gridCardMinHeight = 56.0;
     final double sliderHorizontalPadding = math.max(16.0, screenWidth * 0.06);
     final double settingsWidth = math.min(safeWidth, 420.0);
     // Raise the slider overlay (~30% up from the bottom, but never below the bar)
@@ -1513,7 +1731,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
             style: mainStyle,
             maxLines: mainMaxLines,
             maxHeight: maxHeight,
-            minFontSize: compact ? 9 : 16,
+            minFontSize: compact ? 9 : 14,
             preferSingleLine: preferSingleLine,
           );
 
@@ -1607,13 +1825,12 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                           onTap: () {
                             _playTapClick();
                             if (currentSetWords.isNotEmpty) {
+                              final currentWord = currentSetWords[currentIndex];
                               // Check if we're in a custom list
                               if (selectedLevel == 'custom') {
-                                _removeWordFromCustomList(
-                                    currentSetWords[currentIndex]);
+                                _removeWordFromCustomList(currentWord);
                               } else {
-                                _addWordToCustomSet(
-                                    currentSetWords[currentIndex]);
+                                _toggleCustomSetWord(currentWord);
                               }
                             }
                           },
@@ -1623,14 +1840,26 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                             child: Icon(
                               selectedLevel == 'custom'
                                   ? Icons.delete_outline
-                                  : Icons.star_border,
+                                  : (_isWordInCustomList(
+                                          currentSetWords.isNotEmpty
+                                              ? currentSetWords[currentIndex]
+                                              : null)
+                                      ? Icons.star
+                                      : Icons.star_border),
                               color: selectedLevel == 'custom'
                                   ? (darkTheme
                                       ? Colors.redAccent.shade100
                                       : Colors.blueGrey.shade500)
-                                  : (darkTheme
-                                      ? Colors.white.withValues(alpha: 0.92)
-                                      : const Color(0xFF25455F)),
+                                  : (_isWordInCustomList(
+                                          currentSetWords.isNotEmpty
+                                              ? currentSetWords[currentIndex]
+                                              : null)
+                                      ? (darkTheme
+                                          ? const Color(0xFFFFD54F)
+                                          : const Color(0xFFF59E0B))
+                                      : (darkTheme
+                                          ? Colors.white.withValues(alpha: 0.92)
+                                          : const Color(0xFF25455F))),
                               size: 22,
                             ),
                           ),
@@ -1638,7 +1867,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                       ),
                       Center(
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 60.0),
+                          padding: const EdgeInsets.symmetric(horizontal: 48.0),
                           child: centeredWordBlock(
                             main: singleCardMain,
                             compact: false,
@@ -1706,69 +1935,44 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                           ),
                         ),
                       ),
-                      if (!showENFace && _hasAdditionalTranslations(ukWord))
-                        Positioned(
-                          bottom: 12,
-                          left: 12,
-                          child: Tooltip(
-                            message: 'Переглянути всі переклади',
-                            child: GestureDetector(
-                              onTap: () {
-                                _playTapClick();
-                                if (entry != null) {
-                                  unawaited(_showFullTranslationSheet(entry));
-                                }
-                              },
-                              child: _GlassIconSurface(
-                                size: 38,
-                                dark: darkTheme,
-                                child: Icon(
-                                  Icons.more_horiz,
-                                  color: darkTheme
-                                      ? Colors.white.withValues(alpha: 0.92)
-                                      : const Color(0xFF25455F),
-                                  size: 24,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
                     ],
                   ),
                 ),
               ),
             ),
           ),
-          const SizedBox(height: singleCardGapHeight),
-          // Always reserve space for examples, but only show for EN card
-          SizedBox(
-            height: singleCardExamplesHeight,
-            child: showENFace && cardExamples.isNotEmpty
-                ? Container(
-                    width: cardWidth,
-                    padding: const EdgeInsets.symmetric(
-                        vertical: 8.0, horizontal: 14.0),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFE8F5E9),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      cardExamples.join('\n'),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Color(0xFF2E7D32),
-                        fontFamily: 'Inter',
-                        fontWeight: FontWeight.w500,
-                        fontSize: 14,
-                        height: 1.2,
+          if (_showContextSentenceExamples) ...[
+            const SizedBox(height: singleCardGapHeight),
+            // Always reserve space for examples, but only show for EN card
+            SizedBox(
+              height: singleCardExamplesHeight,
+              child: showENFace && cardExamples.isNotEmpty
+                  ? Container(
+                      width: cardWidth,
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 8.0, horizontal: 14.0),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE8F5E9),
+                        borderRadius: BorderRadius.circular(16),
                       ),
-                    ),
-                  )
-                : null,
-          ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        cardExamples.join('\n'),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Color(0xFF2E7D32),
+                          fontFamily: 'Inter',
+                          fontWeight: FontWeight.w500,
+                          fontSize: 14,
+                          height: 1.2,
+                        ),
+                      ),
+                    )
+                  : null,
+            ),
+          ],
         ],
       ),
     );
@@ -1789,45 +1993,13 @@ class _FlashcardScreenState extends State<FlashcardScreen>
             padding: const EdgeInsets.all(8),
             child: Stack(
               children: [
-                Positioned(
-                  top: 3,
-                  left: 3,
-                  child: GestureDetector(
-                    onTap: () {
-                      _playTapClick();
-                      // Check if we're in a custom list
-                      if (selectedLevel == 'custom') {
-                        _removeWordFromCustomList(entry);
-                      } else {
-                        _addWordToCustomSet(entry);
-                      }
-                    },
-                    child: _GlassIconSurface(
-                      size: 26,
-                      dark: darkTheme,
-                      child: Icon(
-                        selectedLevel == 'custom'
-                            ? Icons.delete_outline
-                            : Icons.star_border,
-                        color: selectedLevel == 'custom'
-                            ? (darkTheme
-                                ? Colors.redAccent.shade100
-                                : Colors.blueGrey.shade500)
-                            : (darkTheme
-                                ? Colors.white.withValues(alpha: 0.92)
-                                : const Color(0xFF25455F)),
-                        size: 16,
-                      ),
-                    ),
-                  ),
-                ),
                 Positioned.fill(
                   child: LayoutBuilder(
                     builder: (context, constraints) {
-                      final reserveSideControls = constraints.maxWidth >= 180;
+                      final reserveSideControls = constraints.maxWidth >= 140;
                       final textPadding = reserveSideControls
-                          ? const EdgeInsets.symmetric(horizontal: 40)
-                          : const EdgeInsets.fromLTRB(12, 40, 12, 4);
+                          ? const EdgeInsets.symmetric(horizontal: 34)
+                          : const EdgeInsets.fromLTRB(10, 32, 10, 4);
                       final displayWord = isEN
                           ? entry.wordMain
                           : _gridTranslation(entry.trans1);
@@ -1838,7 +2010,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                         padding: textPadding,
                         child: Center(
                           child: Transform.translate(
-                            offset: const Offset(0, -8),
+                            offset: const Offset(0, -5),
                             child: centeredWordBlock(
                               main: displayWord,
                               compact: true,
@@ -1881,6 +2053,44 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                         ),
                       );
                     },
+                  ),
+                ),
+                Positioned(
+                  top: 3,
+                  left: 3,
+                  child: GestureDetector(
+                    onTap: () {
+                      _playTapClick();
+                      // Check if we're in a custom list
+                      if (selectedLevel == 'custom') {
+                        _removeWordFromCustomList(entry);
+                      } else {
+                        _toggleCustomSetWord(entry);
+                      }
+                    },
+                    child: _GlassIconSurface(
+                      size: 26,
+                      dark: darkTheme,
+                      child: Icon(
+                        selectedLevel == 'custom'
+                            ? Icons.delete_outline
+                            : (_isWordInCustomList(entry)
+                                ? Icons.star
+                                : Icons.star_border),
+                        color: selectedLevel == 'custom'
+                            ? (darkTheme
+                                ? Colors.redAccent.shade100
+                                : Colors.blueGrey.shade500)
+                            : (_isWordInCustomList(entry)
+                                ? (darkTheme
+                                    ? const Color(0xFFFFD54F)
+                                    : const Color(0xFFF59E0B))
+                                : (darkTheme
+                                    ? Colors.white.withValues(alpha: 0.92)
+                                    : const Color(0xFF25455F))),
+                        size: 16,
+                      ),
+                    ),
                   ),
                 ),
                 Positioned(
@@ -1962,61 +2172,69 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     Widget buildGridView({required double availableHeight}) {
       return LayoutBuilder(
         builder: (context, constraints) {
+          final Orientation screenOrientation =
+              MediaQuery.orientationOf(context);
+          final bool isLandscape = screenOrientation == Orientation.landscape;
+
           final double maxWidth = constraints.maxWidth;
-          final double horizontalPadding =
-              math.max(12.0, math.min(32.0, maxWidth * 0.04));
-          final double availableWidth =
-              math.max(140.0, maxWidth - horizontalPadding * 2);
-          final double spacing =
-              math.max(10.0, math.min(20.0, availableWidth * 0.03));
+          final double viewportHeight = availableHeight;
+
+          // Always 2 columns x 5 rows in portrait, 5 columns x 2 rows in landscape
+          final int crossAxisCount = isLandscape ? 5 : 2;
+          final int fullGridRows = isLandscape ? 2 : 5;
+
           final int startIndex = gridPage * _cardsPerGridPage;
           final int totalRemaining =
               math.max(0, currentSetWords.length - startIndex);
           final int itemsOnPage = totalRemaining > _cardsPerGridPage
               ? _cardsPerGridPage
               : totalRemaining;
-          final double viewportHeight = availableHeight;
-          final double gridTopPadding = 0.0;
-          final double gridBottomPadding = 0.0;
-          final bool isLandscape = maxWidth >= viewportHeight;
-          final bool isTabletLayout =
-              math.min(maxWidth, viewportHeight) >= 600.0;
-          final bool forceTabletGrid =
-              isTabletLayout && itemsOnPage == _cardsPerGridPage;
-          int computedColumns = (availableWidth / 150).floor();
-          if (computedColumns < 2) {
-            computedColumns = 2;
-          } else if (computedColumns > 4) {
-            computedColumns = 4;
-          }
-          final int crossAxisCount =
-              forceTabletGrid ? (isLandscape ? 5 : 2) : computedColumns;
-          final double usableWidth =
-              availableWidth - spacing * (crossAxisCount - 1);
-          final double cardWidth = usableWidth / crossAxisCount;
-          final int rows = itemsOnPage == 0
+
+          final int activeRows = itemsOnPage == 0
               ? 1
-              : forceTabletGrid
-                  ? (isLandscape ? 2 : 5)
-                  : ((itemsOnPage + crossAxisCount - 1) ~/ crossAxisCount);
-          final double availableHeightForCards = math.max(
-              160.0, viewportHeight - gridTopPadding - gridBottomPadding);
+              : ((itemsOnPage + crossAxisCount - 1) ~/ crossAxisCount);
+
+          final double horizontalPadding = isLandscape
+              ? math.max(16.0, math.min(48.0, maxWidth * 0.04))
+              : math.max(12.0, math.min(32.0, maxWidth * 0.04));
+          final double availableWidth =
+              math.max(140.0, maxWidth - horizontalPadding * 2);
+
+          final double crossAxisSpacing = isLandscape
+              ? math.max(8.0, math.min(16.0, availableWidth * 0.02))
+              : math.max(8.0, math.min(16.0, availableWidth * 0.025));
+
+          final double mainAxisSpacing = isLandscape
+              ? math.max(6.0, math.min(14.0, (viewportHeight - 2 * 68.0)))
+              : math.max(6.0, math.min(14.0, (viewportHeight - 5 * 72.0) / 4));
+
+          final double usableWidth =
+              availableWidth - crossAxisSpacing * (crossAxisCount - 1);
+          final double cardWidth = usableWidth / crossAxisCount;
+
+          final double availableHeightForCards =
+              math.max(120.0, viewportHeight);
+
+          // Card height based on full 10-card capacity to preserve card shape on partial page
           final double fittedCardHeight =
-              (availableHeightForCards - spacing * (rows - 1)) / rows;
-          final double cardHeight = forceTabletGrid
-              ? math.max(gridCardMinHeight, fittedCardHeight)
-              : math.max(gridCardMinHeight,
-                  math.min(cardWidth * 0.78, fittedCardHeight));
+              (availableHeightForCards - mainAxisSpacing * (fullGridRows - 1)) /
+                  fullGridRows;
+
+          final double maxAllowedCardHeight = isLandscape
+              ? fittedCardHeight
+              : math.min(fittedCardHeight, cardWidth * 0.95);
+          final double cardHeight =
+              math.max(56.0, maxAllowedCardHeight);
+
           final double aspectRatio = cardWidth / cardHeight;
-          final double gridContentHeight =
-              rows * cardHeight + math.max(0, rows - 1) * spacing;
+
+          final double gridContentHeight = activeRows == 0
+              ? 0.0
+              : activeRows * cardHeight +
+                  math.max(0, activeRows - 1) * mainAxisSpacing;
           final double extraVerticalPadding = math.max(
             0.0,
-            (viewportHeight -
-                    gridContentHeight -
-                    gridTopPadding -
-                    gridBottomPadding) /
-                2,
+            (viewportHeight - gridContentHeight) / 2,
           );
 
           return GestureDetector(
@@ -2032,17 +2250,18 @@ class _FlashcardScreenState extends State<FlashcardScreen>
             child: Padding(
               padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
               child: GridView.builder(
+                key: const ValueKey('flashcards_grid_view'),
                 padding: EdgeInsets.only(
-                  bottom: gridBottomPadding + extraVerticalPadding,
-                  top: gridTopPadding + extraVerticalPadding,
+                  top: extraVerticalPadding,
+                  bottom: extraVerticalPadding,
                 ),
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 itemCount: itemsOnPage,
                 gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: crossAxisCount,
-                  crossAxisSpacing: spacing,
-                  mainAxisSpacing: spacing,
+                  crossAxisSpacing: crossAxisSpacing,
+                  mainAxisSpacing: mainAxisSpacing,
                   childAspectRatio: aspectRatio,
                 ),
                 itemBuilder: (context, i) =>
@@ -2148,6 +2367,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
               gridPage = v.round();
               gridCardENFace = List.filled(_cardsPerGridPage, showENFace);
             });
+            _saveCurrentPosition();
           },
         );
       } else {
@@ -2167,6 +2387,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
             setState(() {
               currentIndex = v.round();
             });
+            _saveCurrentPosition();
           },
         );
       }
@@ -2220,6 +2441,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                     required Widget icon,
                     required String label,
                     String? subLabel,
+                    Color? subLabelColor,
                     required bool enabled,
                     required VoidCallback onTap,
                   }) {
@@ -2232,9 +2454,10 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                     final Color labelColor = enabled
                         ? Colors.black
                         : (darkTheme ? Colors.white : Colors.black87);
-                    final Color subColor = enabled
-                        ? Colors.black54
-                        : (darkTheme ? Colors.white60 : Colors.black54);
+                    final Color subColor = subLabelColor ??
+                        (enabled
+                            ? Colors.black54
+                            : (darkTheme ? Colors.white60 : Colors.black54));
                     return GestureDetector(
                       onTap: () {
                         _playTapClick();
@@ -2306,6 +2529,10 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                     }
 
                     if (activeSettingsPanel == 'sleep') {
+                      final bool isTimerActive = sleepTimerEnd != null;
+                      final Color timerActiveColor = darkTheme
+                          ? const Color(0xFF4ADE80)
+                          : const Color(0xFF2E7D32);
                       return Container(
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
@@ -2315,7 +2542,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                           borderRadius: BorderRadius.circular(16),
                           border: Border.all(
                             color: panelBorderColor(
-                              sleepTimerEnd != null ||
+                              isTimerActive ||
                                   activeSettingsPanel == 'sleep',
                             ),
                           ),
@@ -2337,13 +2564,15 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                               children: [
                                 Expanded(
                                   child: Text(
-                                    sleepTimerEnd == null
+                                    !isTimerActive
                                         ? _t('off')
                                         : _remainingSleepMinutesLabel(),
                                     style: TextStyle(
-                                      color: darkTheme
-                                          ? Colors.white
-                                          : Colors.black,
+                                      color: isTimerActive
+                                          ? timerActiveColor
+                                          : (darkTheme
+                                              ? Colors.white
+                                              : Colors.black),
                                       fontSize: 18,
                                       fontWeight: FontWeight.w600,
                                     ),
@@ -2425,8 +2654,11 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                                   },
                                   icon: Icon(
                                     Icons.play_arrow,
-                                    color:
-                                        darkTheme ? Colors.white : Colors.black,
+                                    color: isTimerActive
+                                        ? timerActiveColor
+                                        : (darkTheme
+                                            ? Colors.white
+                                            : Colors.black),
                                     size: 22,
                                   ),
                                 ),
@@ -2546,6 +2778,37 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                               value: false,
                               onChanged: (_) =>
                                   _openLegalUrl(_privacyPolicyUrl),
+                              darkTheme: darkTheme,
+                              isButton: true,
+                              labelColor:
+                                  darkTheme ? Colors.white60 : Colors.black38,
+                              chevronColor:
+                                  darkTheme ? Colors.white60 : Colors.black38,
+                            ),
+                            const SizedBox(height: 10),
+                            _settingsRow(
+                              icon: Icon(
+                                Icons.tune_rounded,
+                                size: 32,
+                                color:
+                                    darkTheme ? Colors.white60 : Colors.black38,
+                              ),
+                              label: _t('ad_privacy'),
+                              value: false,
+                              onChanged: (_) async {
+                                final messenger = ScaffoldMessenger.of(context);
+                                final shown = await ConsentManager.instance
+                                    .showPrivacyOptionsForm();
+                                if (!mounted) return;
+                                if (!shown) {
+                                  messenger.showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                          _t('privacy_options_unavailable')),
+                                    ),
+                                  );
+                                }
+                              },
                               darkTheme: darkTheme,
                               isButton: true,
                               labelColor:
@@ -2682,6 +2945,11 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                                           subLabel: sleepTimerEnd == null
                                               ? _t('off')
                                               : _remainingSleepMinutesLabel(),
+                                          subLabelColor: sleepTimerEnd != null
+                                              ? (darkTheme
+                                                  ? const Color(0xFF4ADE80)
+                                                  : const Color(0xFF2E7D32))
+                                              : null,
                                           enabled: sleepTimerEnd != null ||
                                               activeSettingsPanel == 'sleep',
                                           onTap: () => togglePanel('sleep'),
@@ -2899,13 +3167,13 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                                           const Icon(
                                             Icons.timer_outlined,
                                             size: 16,
-                                            color: Colors.white,
+                                            color: Color(0xFF4ADE80),
                                           ),
                                           const SizedBox(width: 6),
                                           Text(
                                             _remainingSleepMinutesLabel(),
                                             style: const TextStyle(
-                                              color: Colors.white,
+                                              color: Color(0xFF4ADE80),
                                               fontFamily: 'Inter',
                                               fontWeight: FontWeight.w700,
                                               fontSize: 16,
@@ -2980,6 +3248,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                                   filterCurrentSet();
                                   showWordsMenu = false;
                                 });
+                                _saveCurrentPosition();
                               },
                             ),
                           ],
@@ -3019,6 +3288,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                                   setState(() {
                                     gridMode = !gridMode;
                                   });
+                                  _saveCurrentPosition();
                                 },
                                 child: _GlassIconSurface(
                                   size: 42,
@@ -3089,7 +3359,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                               child: bottomAction(
                                 onTap: () async {
                                   if (!isPlaying) {
-                                    if (!await _requirePremium('Автоплей')) {
+                                    if (!await _requirePremium(_t('autoplay'))) {
                                       return;
                                     }
                                     playSetWords();
@@ -3232,6 +3502,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
                               filterCurrentSet();
                               showWordsMenu = false;
                             });
+                            _saveCurrentPosition();
                           },
                         ),
                       ),
@@ -3298,6 +3569,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
           entry.sublist == selectedSublist &&
           entry.wordMain.trim().toLowerCase() ==
               word.wordMain.trim().toLowerCase());
+      _updateCustomWordsSet();
       _invalidateGroupedLists();
 
       filterCurrentSet();
@@ -3318,16 +3590,54 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     );
   }
 
+  Future<void> _removeWordFromAnyCustomList(WordEntry word) async {
+    final cleanWord = word.wordMain.trim().toLowerCase();
+    setState(() {
+      _customEntries.removeWhere((entry) =>
+          entry.wordMain.trim().toLowerCase() == cleanWord);
+      allWords.removeWhere((entry) =>
+          entry.level == 'custom' &&
+          entry.wordMain.trim().toLowerCase() == cleanWord);
+      _updateCustomWordsSet();
+      _invalidateGroupedLists();
+      if (selectedLevel == 'custom') {
+        filterCurrentSet();
+      }
+    });
+
+    await _saveCustomListEntries(_customEntries);
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          _t('removed_from_custom').replaceAll('{word}', word.wordMain),
+        ),
+        backgroundColor: Colors.redAccent,
+        duration: const Duration(milliseconds: 600),
+      ),
+    );
+  }
+
+  Future<void> _toggleCustomSetWord(WordEntry word) async {
+    if (_isWordInCustomList(word)) {
+      await _removeWordFromAnyCustomList(word);
+    } else {
+      await _addWordToCustomSet(word);
+    }
+  }
+
   Future<void> _addWordToCustomSet(WordEntry word) async {
     if (targetCustomSet.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(_t('no_target_list')),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
+      if (allCustomListNames.isNotEmpty) {
+        targetCustomSet = allCustomListNames.first;
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('targetCustomSet', targetCustomSet);
+      } else {
+        if (!mounted) return;
+        _showCustomListDialog(setAsTarget: true, wordToAddOnCreate: word);
+        return;
+      }
     }
 
     // Check if the word already exists in the target custom list (using cache)
@@ -3363,6 +3673,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
 
     // Update in-memory cache and allWords list
     _customEntries.add(newEntry);
+    _updateCustomWordsSet();
 
     // Save to persistent storage in background
     _saveCustomListEntries(_customEntries);
@@ -3377,9 +3688,10 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     });
 
     if (!mounted) return;
+    final savedMsg = _t('saved_to_custom').replaceAll('{word}', word.wordMain);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Saved "${word.wordMain}" to target list.'),
+        content: Text(savedMsg),
         backgroundColor: Colors.green,
         duration: const Duration(milliseconds: 500),
       ),
@@ -3875,17 +4187,23 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     );
   }
 
-  void _showCustomListDialog({bool setAsTarget = false}) {
+  void _showCustomListDialog(
+      {bool setAsTarget = false, WordEntry? wordToAddOnCreate}) {
     final TextEditingController listNameController = TextEditingController();
-    const accentBlue = Color(0xFF1A237E);
+    final bool isDark = darkTheme;
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFFFDFBFF),
+        backgroundColor: isDark ? const Color(0xFF1E2A3A) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text(
           _t('create_custom_list'),
-          style: const TextStyle(fontSize: 22),
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+            color: isDark ? Colors.white : const Color(0xFF102A43),
+          ),
         ),
         content: SingleChildScrollView(
           child: Column(
@@ -3894,50 +4212,85 @@ class _FlashcardScreenState extends State<FlashcardScreen>
               TextField(
                 controller: listNameController,
                 autofocus: true,
-                style: const TextStyle(fontSize: 22),
+                cursorColor:
+                    isDark ? const Color(0xFF2AB7A9) : const Color(0xFF1F6F78),
+                style: TextStyle(
+                  fontSize: 18,
+                  color: isDark ? Colors.white : const Color(0xFF102A43),
+                ),
                 decoration: InputDecoration(
                   labelText: _t('list_name'),
+                  labelStyle: TextStyle(
+                    color: isDark
+                        ? const Color(0xFF2AB7A9)
+                        : const Color(0xFF1F6F78),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
                   hintText: _t('my_custom_list'),
+                  hintStyle: TextStyle(
+                    color: isDark ? Colors.white38 : const Color(0xFF94A3B8),
+                  ),
                   helperText: _t('custom_list_tip'),
                   helperMaxLines: 3,
                   helperStyle: TextStyle(
-                    color: Colors.black.withValues(alpha: 0.55),
-                    fontSize: 17,
+                    color: isDark ? Colors.white60 : const Color(0xFF64748B),
+                    fontSize: 13,
+                    height: 1.3,
                   ),
-                  labelStyle: const TextStyle(
-                    color: accentBlue,
-                    fontSize: 22,
-                    fontWeight: FontWeight.w600,
+                  focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(
+                      color: isDark
+                          ? const Color(0xFF2AB7A9)
+                          : const Color(0xFF1F6F78),
+                      width: 2,
+                    ),
+                  ),
+                  enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(
+                      color: isDark ? Colors.white24 : const Color(0xFFCBD5E1),
+                      width: 1.5,
+                    ),
                   ),
                 ),
               ),
             ],
           ),
         ),
+        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
             style: TextButton.styleFrom(
-              foregroundColor: accentBlue,
-              textStyle: const TextStyle(fontSize: 22),
+              foregroundColor:
+                  isDark ? Colors.white70 : const Color(0xFF64748B),
+              textStyle:
+                  const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
             ),
             child: Text(_t('cancel')),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: accentBlue,
+              backgroundColor:
+                  isDark ? const Color(0xFF2AB7A9) : const Color(0xFF1F6F78),
               foregroundColor: Colors.white,
-              textStyle: const TextStyle(fontSize: 22),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              textStyle:
+                  const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
             ),
             onPressed: () {
-              // --- CHANGE THIS CONDITION ---
-              if (listNameController.text.isNotEmpty) {
+              final text = listNameController.text.trim();
+              if (text.isNotEmpty) {
+                Navigator.pop(context);
                 _createCustomList(
-                  listNameController.text.trim(),
+                  text,
                   '',
                   setAsTarget: setAsTarget,
+                  wordToAddOnCreate: wordToAddOnCreate,
                 );
-                Navigator.pop(context);
               }
             },
             child: Text(_t('create')),
@@ -3948,7 +4301,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
   }
 
   Future<void> _createCustomList(String listName, String wordsText,
-      {bool setAsTarget = false}) async {
+      {bool setAsTarget = false, WordEntry? wordToAddOnCreate}) async {
     // Format list name
     String formattedListName =
         'list_custom_${listName.replaceAll(' ', '_').toLowerCase()}';
@@ -3967,6 +4320,32 @@ class _FlashcardScreenState extends State<FlashcardScreen>
         .map((word) => word.trim())
         .where((word) => word.isNotEmpty)
         .toList();
+
+    if (words.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        if (!allCustomListNames.contains(formattedListName)) {
+          allCustomListNames.add(formattedListName);
+          _invalidateGroupedLists();
+        }
+      });
+      if (setAsTarget) {
+        await _setTargetCustomSet(formattedListName);
+      }
+      if (wordToAddOnCreate != null) {
+        await _addWordToCustomSet(wordToAddOnCreate);
+      } else {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${_t('create_custom_list')}: $listName'),
+            backgroundColor: const Color(0xFF1F6F78),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+      return;
+    }
 
     // Show loading indicator with progress
     int processed = 0;
@@ -4098,22 +4477,58 @@ class _FlashcardScreenState extends State<FlashcardScreen>
   }
 
   Future<void> _showDeleteCustomListDialog(String listName) async {
+    final isDark = darkTheme;
     return showDialog<void>(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: Text(_t('delete_list')),
-          content: Text(_t('delete_confirm').replaceAll('{list}', listName)),
+          backgroundColor: isDark ? const Color(0xFF1E2A3A) : Colors.white,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Text(
+            _t('delete_list'),
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              color: isDark ? Colors.white : const Color(0xFF102A43),
+            ),
+          ),
+          content: Text(
+            _t('delete_confirm').replaceAll('{list}', listName),
+            style: TextStyle(
+              color: isDark ? Colors.white70 : const Color(0xFF4B5563),
+              fontSize: 15,
+            ),
+          ),
+          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           actions: <Widget>[
             TextButton(
-              child: Text(_t('cancel')),
+              child: Text(
+                _t('cancel'),
+                style: TextStyle(
+                  color: isDark ? Colors.white70 : const Color(0xFF64748B),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
               onPressed: () {
                 Navigator.of(context).pop();
               },
             ),
-            TextButton(
-              child:
-                  Text(_t('delete'), style: const TextStyle(color: Colors.red)),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.redAccent,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                textStyle:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+              ),
+              child: Text(_t('delete')),
               onPressed: () async {
                 Navigator.of(context).pop();
                 await _deleteCustomList(listName);
@@ -4136,6 +4551,7 @@ class _FlashcardScreenState extends State<FlashcardScreen>
     // 2. Filter the cached words
     _customEntries =
         _customEntries.where((entry) => entry.sublist != listName).toList();
+    _updateCustomWordsSet();
     allWords.removeWhere(
         (entry) => entry.level == 'custom' && entry.sublist == listName);
     _invalidateGroupedLists();

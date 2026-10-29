@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'services/billing_service.dart';
 import 'screens/home_splash.dart';
 import 'screens/flashcards_screen.dart';
@@ -7,7 +6,6 @@ import 'screens/language_selection_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await MobileAds.instance.initialize();
   await BillingService().init();
   runApp(const WordsApp());
 }

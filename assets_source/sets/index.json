@@ -1,0 +1,19 @@
+{
+  "sets": [
+    {
+      "id": "set1",
+      "name": "Basics",
+      "file": "set1.json"
+    },
+    {
+      "id": "set2",
+      "name": "Travel",
+      "file": "set2.json"
+    },
+    {
+      "id": "set3",
+      "name": "Nature",
+      "file": "set3.json"
+    }
+  ]
+}

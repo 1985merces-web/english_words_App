@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
+import 'billing_service.dart';
+import 'consent_manager.dart';
 import 'interstitial_ad_manager.dart';
 
 class AdHelper {
@@ -15,8 +17,11 @@ class AdHelper {
       debugManagerOverride ?? _defaultManager;
 
   static String get interstitialAdUnitId {
+    if (kDebugMode) {
+      return 'ca-app-pub-3940256099942544/1033173712'; // Safe Google Test ID for debug testing
+    }
     if (Platform.isAndroid) {
-      return 'ca-app-pub-3940256099942544/1033173712'; // Test ID
+      return 'ca-app-pub-1521649910542801/4624149942'; // Production Ad Unit ID
     } else if (Platform.isIOS) {
       return 'ca-app-pub-3940256099942544/4411468910'; // Test ID
     }
@@ -36,7 +41,18 @@ class AdHelper {
         ),
       );
 
-  static void loadInterstitialAd() => _manager.preload();
+  static void loadInterstitialAd() {
+    if (BillingService().hasPremiumAccess) return;
+    if (debugManagerOverride == null &&
+        !ConsentManager.instance.isMobileAdsInitialized) {
+      return;
+    }
+    _manager.preload();
+  }
+
+  static void disableAds() {
+    _manager.clear();
+  }
 
   static void showInterstitialAd({required VoidCallback onAdClosed}) =>
       _manager.show(onAdClosed: onAdClosed);

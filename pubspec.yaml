@@ -2,7 +2,7 @@ name: english_words_app
 description: A Flutter vocabulary trainer
 publish_to: 'none'
 
-version: 1.0.1+4
+version: 1.0.2+6
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -30,6 +30,10 @@ dev_dependencies:
   flutter_lints: ^5.0.0
   flutter_launcher_icons: ^0.13.1
 
+dependency_overrides:
+  in_app_purchase_android:
+    path: packages/in_app_purchase_android
+
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
@@ -43,3 +47,4 @@ flutter:
     - assets/data/reader/
     - assets/icons/
     - assets/images/LogoMain.svg
+    - assets/sounds/

@@ -103,4 +103,35 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets('AdaptiveCardText avoids mid-word breaks for phrases',
+      (tester) async {
+    const phrase = 'неспроможний; незахищений';
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 150.0,
+            height: 84.0,
+            child: Center(
+              child: AdaptiveCardText(
+                text: phrase,
+                style: const TextStyle(
+                  fontSize: 27,
+                  fontWeight: FontWeight.w700,
+                ),
+                maxLines: 3,
+                maxHeight: 84.0,
+                minFontSize: 10,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final paragraph = tester.renderObject<RenderParagraph>(find.text(phrase));
+    expect(paragraph.didExceedMaxLines, isFalse);
+    expect(tester.takeException(), isNull);
+  });
 }
